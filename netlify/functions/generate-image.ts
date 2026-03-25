@@ -35,7 +35,7 @@ export default async (req: Request, _context: Context) => {
       : `Create a clean, professional diagram or conceptual illustration suitable for a printed non-fiction book. Based on this chapter titled "${chapterTitle}", create a simple visual model — such as a 2x2 matrix, flowchart, process diagram, concept map, or comparison chart — that illustrates one key concept or framework from the text. Use a minimalist black and white style with clean lines. Do NOT create a decorative illustration or scene — create an informational diagram. Chapter excerpt: ${truncated}`;
 
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
