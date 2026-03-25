@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
     "@netlify/blobs": "^8.1.0",
     "@netlify/functions": "^3.0.0",
     "@tiptap/extension-character-count": "^2.11.5",

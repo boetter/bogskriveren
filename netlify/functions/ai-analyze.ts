@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { getStore } from "@netlify/blobs";
 import type { Context } from "@netlify/functions";
 
@@ -42,30 +41,53 @@ export default async (req: Request, _context: Context) => {
       .map((ch, i) => `--- Kapitel ${i + 1}: ${ch.title} ---\n\n${ch.content}`)
       .join("\n\n\n");
 
-    const client = new Anthropic({ apiKey });
-
-    const response = await client.messages.create({
-      model,
-      max_tokens: 8000,
-      system:
-        "Du er en professionel bogredigerer og analytiker. Du hjælper med at analysere bogkapitler på dansk. " +
-        "Din opgave er at give en grundig, konkret og handlingsorienteret analyse baseret på de kapitler du modtager. " +
-        "Strukturér dit svar med klare overskrifter og punkter. Giv specifikke referencer til de relevante kapitler og afsnit.",
-      messages: [
-        {
-          role: "user",
-          content: `Her er ${chapters.length} kapitler fra en bog:\n\n${chapterTexts}\n\n---\n\nAnalyseopgave: ${prompt}`,
-        },
-      ],
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 8000,
+        system:
+          "Du er en professionel bogredigerer og analytiker. Du hjælper med at analysere bogkapitler på dansk. " +
+          "Din opgave er at give en grundig, konkret og handlingsorienteret analyse baseret på de kapitler du modtager. " +
+          "Strukturér dit svar med klare overskrifter og punkter. Giv specifikke referencer til de relevante kapitler og afsnit.",
+        messages: [
+          {
+            role: "user",
+            content: `Her er ${chapters.length} kapitler fra en bog:\n\n${chapterTexts}\n\n---\n\nAnalyseopgave: ${prompt}`,
+          },
+        ],
+      }),
     });
 
-    const resultContent = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
-      .map((block) => block.text)
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const errorMsg = (errorData as any)?.error?.message || `API fejl (${response.status})`;
+      console.error("Anthropic API error:", JSON.stringify(errorData));
+
+      if (response.status === 401) {
+        return Response.json({ error: "Ugyldig API-nøgle. Tjek din ANTHROPIC_API_KEY." }, { status: 401 });
+      }
+      if (response.status === 429) {
+        return Response.json({ error: "Rate limit nået. Vent lidt og prøv igen." }, { status: 429 });
+      }
+
+      return Response.json({ error: errorMsg }, { status: response.status });
+    }
+
+    const data = await response.json() as any;
+
+    const resultContent = data.content
+      .filter((block: any) => block.type === "text")
+      .map((block: any) => block.text)
       .join("");
 
-    const inputTokens = response.usage.input_tokens;
-    const outputTokens = response.usage.output_tokens;
+    const inputTokens = data.usage.input_tokens;
+    const outputTokens = data.usage.output_tokens;
 
     // Store the analysis
     const analysis: AnalysisEntry = {
@@ -117,12 +139,6 @@ export default async (req: Request, _context: Context) => {
     });
   } catch (error: any) {
     console.error("AI analysis failed:", error);
-    if (error?.status === 401) {
-      return Response.json({ error: "Ugyldig API-nøgle." }, { status: 401 });
-    }
-    if (error?.status === 429) {
-      return Response.json({ error: "Rate limit nået. Vent lidt og prøv igen." }, { status: 429 });
-    }
     return Response.json({ error: error?.message || "AI-analyse fejlede" }, { status: 500 });
   }
 };
