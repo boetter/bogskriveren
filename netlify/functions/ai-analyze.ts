@@ -61,41 +61,34 @@ export default async (req: Request, _context: Context) => {
     const client = new Anthropic({ apiKey });
 
     const apiStartTime = Date.now();
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
 
-    let response: Anthropic.Message;
-    try {
-      response = await client.messages.create(
+    // Use streaming to avoid Netlify function timeout (streaming responses get up to 5 min)
+    const stream = await client.messages.stream({
+      model,
+      max_tokens: 8000,
+      system:
+        "Du er en professionel bogredigerer og analytiker. Du hjælper med at analysere bogkapitler på dansk. " +
+        "Din opgave er at give en grundig, konkret og handlingsorienteret analyse baseret på de kapitler du modtager. " +
+        "Strukturér dit svar med klare overskrifter og punkter. Giv specifikke referencer til de relevante kapitler og afsnit.",
+      messages: [
         {
-          model,
-          max_tokens: 8000,
-          system:
-            "Du er en professionel bogredigerer og analytiker. Du hjælper med at analysere bogkapitler på dansk. " +
-            "Din opgave er at give en grundig, konkret og handlingsorienteret analyse baseret på de kapitler du modtager. " +
-            "Strukturér dit svar med klare overskrifter og punkter. Giv specifikke referencer til de relevante kapitler og afsnit.",
-          messages: [
-            {
-              role: "user",
-              content: `Her er ${chapters.length} kapitler fra en bog:\n\n${chapterTexts}\n\n---\n\nAnalyseopgave: ${prompt}`,
-            },
-          ],
+          role: "user",
+          content: `Her er ${chapters.length} kapitler fra en bog:\n\n${chapterTexts}\n\n---\n\nAnalyseopgave: ${prompt}`,
         },
-        { signal: controller.signal }
-      );
-    } finally {
-      clearTimeout(timeout);
-    }
+      ],
+    });
 
+    // Collect all text from the stream
+    const finalMessage = await stream.finalMessage();
     const apiDuration = Date.now() - apiStartTime;
 
-    const resultContent = response.content
+    const resultContent = finalMessage.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")
       .map((block) => block.text)
       .join("");
 
-    const inputTokens = response.usage.input_tokens;
-    const outputTokens = response.usage.output_tokens;
+    const inputTokens = finalMessage.usage.input_tokens;
+    const outputTokens = finalMessage.usage.output_tokens;
 
     console.log(`[ai-analyze] API response in ${apiDuration}ms | input=${inputTokens}, output=${outputTokens}`);
 
@@ -160,15 +153,6 @@ export default async (req: Request, _context: Context) => {
     const totalDuration = Date.now() - startTime;
     console.error(`[ai-analyze] FAILED after ${totalDuration}ms:`, error?.message || error);
 
-    if (error?.name === "AbortError" || error?.message?.includes("abort")) {
-      return Response.json(
-        {
-          error: "API-kaldet tog for lang tid (timeout efter 25s). Prøv med færre kapitler eller en hurtigere model.",
-          debug: { totalDurationMs: totalDuration, errorType: "timeout" },
-        },
-        { status: 504 }
-      );
-    }
     if (error?.status === 401) {
       return Response.json({ error: "Ugyldig API-nøgle.", debug: { errorType: "auth" } }, { status: 401 });
     }
