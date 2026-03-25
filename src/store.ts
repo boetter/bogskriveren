@@ -68,6 +68,13 @@ interface AIProgress {
   currentChapterTitle: string
 }
 
+interface AILogEntry {
+  timestamp: string
+  level: 'info' | 'success' | 'error' | 'warn'
+  message: string
+  details?: any
+}
+
 interface BookStore {
   book: Book
   activeView: ActiveView
@@ -127,6 +134,7 @@ interface BookStore {
   aiProgress: AIProgress | null
   aiError: string | null
   aiDebugInfo: any | null
+  aiLog: AILogEntry[]
   showAiPanel: boolean
   aiPanelMode: 'process' | 'analyze'
   setShowAiPanel: (show: boolean, mode?: 'process' | 'analyze') => void
@@ -188,6 +196,7 @@ export const useBookStore = create<BookStore>((set, get) => {
     aiProgress: null,
     aiError: null,
     aiDebugInfo: null,
+    aiLog: [],
     showAiPanel: false,
     aiPanelMode: 'process',
     analyses: [],
@@ -545,6 +554,12 @@ export const useBookStore = create<BookStore>((set, get) => {
       set({ showAiPanel: show, aiPanelMode: mode || 'process' }),
 
     processWithAi: async (prompt, model) => {
+      const addLog = (level: AILogEntry['level'], message: string, details?: any) => {
+        set((s) => ({
+          aiLog: [...s.aiLog, { timestamp: new Date().toISOString(), level, message, details }],
+        }))
+      }
+
       const state = get()
       const { aiSelectedChapters, book } = state
 
@@ -569,20 +584,30 @@ export const useBookStore = create<BookStore>((set, get) => {
         aiProcessing: true,
         aiError: null,
         aiDebugInfo: null,
+        aiLog: [],
         aiProgress: { current: 0, total: selectedItems.length, currentChapterTitle: '' },
       })
 
-      try {
-        for (let i = 0; i < selectedItems.length; i++) {
-          const { section, chapter } = selectedItems[i]
-          set({
-            aiProgress: {
-              current: i,
-              total: selectedItems.length,
-              currentChapterTitle: chapter.title,
-            },
-          })
+      addLog('info', `Starter redigering af ${selectedItems.length} kapitler med model=${model}`)
+      addLog('info', `Prompt: "${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}"`)
 
+      let successCount = 0
+      let failCount = 0
+
+      for (let i = 0; i < selectedItems.length; i++) {
+        const { section, chapter } = selectedItems[i]
+        set({
+          aiProgress: {
+            current: i,
+            total: selectedItems.length,
+            currentChapterTitle: chapter.title,
+          },
+        })
+
+        addLog('info', `[${i + 1}/${selectedItems.length}] Sender "${chapter.title}" (${chapter.content.length} HTML-tegn)`)
+
+        try {
+          const fetchStart = Date.now()
           const res = await fetch('/api/ai-process', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -594,15 +619,38 @@ export const useBookStore = create<BookStore>((set, get) => {
             }),
           })
 
+          const fetchDuration = Date.now() - fetchStart
+
           if (!res.ok) {
-            const err = await res.json()
-            set({ aiDebugInfo: err.debug || null })
-            throw new Error(err.error || `Fejl ved behandling af "${chapter.title}"`)
+            let errBody: any = {}
+            try { errBody = await res.json() } catch { /* ignore */ }
+            addLog('error', `[${i + 1}/${selectedItems.length}] FEJL for "${chapter.title}": HTTP ${res.status} efter ${fetchDuration}ms`, {
+              status: res.status,
+              error: errBody.error,
+              debug: errBody.debug,
+            })
+            set({ aiDebugInfo: errBody.debug || null })
+            failCount++
+            continue // Continue with next chapter instead of stopping
           }
 
           const result = await res.json()
+
+          addLog('success', `[${i + 1}/${selectedItems.length}] "${chapter.title}" OK (${fetchDuration}ms)`, {
+            inputTokens: result.usage?.inputTokens,
+            outputTokens: result.usage?.outputTokens,
+            resultLength: result.content?.length,
+            ...(result.debug || {}),
+          })
+
           if (result.debug) {
             set({ aiDebugInfo: result.debug })
+          }
+
+          if (!result.content || result.content.trim().length === 0) {
+            addLog('warn', `[${i + 1}/${selectedItems.length}] "${chapter.title}" returnerede tomt indhold — springer over`)
+            failCount++
+            continue
           }
 
           updateBook((book) => ({
@@ -635,25 +683,42 @@ export const useBookStore = create<BookStore>((set, get) => {
                 : s
             ),
           }))
+          successCount++
+        } catch (error: any) {
+          addLog('error', `[${i + 1}/${selectedItems.length}] UNDTAGELSE for "${chapter.title}": ${error.message}`)
+          failCount++
+          continue // Continue with next chapter
         }
-
-        set({
-          aiProgress: {
-            current: selectedItems.length,
-            total: selectedItems.length,
-            currentChapterTitle: '',
-          },
-        })
-        get().saveToServer()
-        get().loadApiUsage()
-      } catch (error: any) {
-        set({ aiError: error.message || 'AI-behandling fejlede' })
-      } finally {
-        set({ aiProcessing: false })
       }
+
+      const summary = `Færdig: ${successCount} ok, ${failCount} fejl af ${selectedItems.length} kapitler`
+      addLog(failCount > 0 ? 'warn' : 'success', summary)
+
+      if (failCount > 0 && successCount === 0) {
+        set({ aiError: `Alle ${failCount} kapitler fejlede. Se debug-log for detaljer.` })
+      } else if (failCount > 0) {
+        set({ aiError: `${failCount} af ${selectedItems.length} kapitler fejlede. Se debug-log.` })
+      }
+
+      set({
+        aiProgress: {
+          current: selectedItems.length,
+          total: selectedItems.length,
+          currentChapterTitle: '',
+        },
+      })
+      get().saveToServer()
+      get().loadApiUsage()
+      set({ aiProcessing: false })
     },
 
     analyzeWithAi: async (prompt, model) => {
+      const addLog = (level: AILogEntry['level'], message: string, details?: any) => {
+        set((s) => ({
+          aiLog: [...s.aiLog, { timestamp: new Date().toISOString(), level, message, details }],
+        }))
+      }
+
       const state = get()
       const { aiSelectedChapters, book } = state
 
@@ -674,21 +739,40 @@ export const useBookStore = create<BookStore>((set, get) => {
         return
       }
 
-      set({ aiProcessing: true, aiError: null, aiProgress: { current: 0, total: 1, currentChapterTitle: 'Analyserer...' } })
+      set({ aiProcessing: true, aiError: null, aiLog: [], aiProgress: { current: 0, total: 1, currentChapterTitle: 'Analyserer...' } })
+
+      const totalChars = chapters.reduce((sum, ch) => sum + ch.content.length, 0)
+      addLog('info', `Starter analyse af ${chapters.length} kapitler med model=${model}`)
+      addLog('info', `Kapitler: ${chapters.map((c) => c.title).join(', ')} (${totalChars} tegn total)`)
 
       try {
+        const fetchStart = Date.now()
         const res = await fetch('/api/ai-analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chapters, prompt, model }),
         })
+        const fetchDuration = Date.now() - fetchStart
 
         if (!res.ok) {
-          const err = await res.json()
-          throw new Error(err.error || 'AI-analyse fejlede')
+          let errBody: any = {}
+          try { errBody = await res.json() } catch { /* ignore */ }
+          addLog('error', `FEJL: HTTP ${res.status} efter ${fetchDuration}ms`, {
+            status: res.status,
+            error: errBody.error,
+            debug: errBody.debug,
+          })
+          throw new Error(errBody.error || 'AI-analyse fejlede')
         }
 
         const result = await res.json()
+        addLog('success', `Analyse OK (${fetchDuration}ms)`, {
+          inputTokens: result.usage?.inputTokens,
+          outputTokens: result.usage?.outputTokens,
+          resultLength: result.analysis?.result?.length,
+          ...(result.debug || {}),
+        })
+
         set((s) => ({
           analyses: [...s.analyses, result.analysis],
           aiProgress: { current: 1, total: 1, currentChapterTitle: '' },

@@ -24,6 +24,7 @@ export default function AIPanel() {
     aiProgress,
     aiError,
     aiDebugInfo,
+    aiLog,
     aiPanelMode,
     processWithAi,
     analyzeWithAi,
@@ -294,6 +295,33 @@ export default function AIPanel() {
                 <pre className="mt-1 text-[10px] text-red-400 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(aiDebugInfo, null, 2)}</pre>
               </details>
             )}
+          </div>
+        )}
+
+        {/* Debug log */}
+        {aiLog.length > 0 && (
+          <div className="bg-stone-900 rounded-lg p-3 max-h-56 overflow-y-auto">
+            <div className="text-[10px] font-mono space-y-0.5">
+              {aiLog.map((entry, idx) => {
+                const timeStr = new Date(entry.timestamp).toLocaleTimeString('da-DK')
+                const levelColor = entry.level === 'error' ? 'text-red-400'
+                  : entry.level === 'warn' ? 'text-amber-400'
+                  : entry.level === 'success' ? 'text-emerald-400'
+                  : 'text-stone-400'
+                return (
+                  <div key={idx}>
+                    <span className="text-stone-600">{timeStr}</span>{' '}
+                    <span className={levelColor}>{entry.message}</span>
+                    {entry.details && (
+                      <details className="ml-4">
+                        <summary className="text-stone-500 cursor-pointer">detaljer</summary>
+                        <pre className="text-stone-500 whitespace-pre-wrap">{JSON.stringify(entry.details, null, 2)}</pre>
+                      </details>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
 
