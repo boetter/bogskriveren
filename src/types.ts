@@ -161,8 +161,8 @@ export const ANALYSIS_PROMPTS: PresetPrompt[] = [
 ]
 
 export const AI_MODELS = [
-  { id: 'claude-sonnet-4-5-20250514', label: 'Claude Sonnet 4.6', costInput: 3, costOutput: 15 },
-  { id: 'claude-opus-4-5-20250514', label: 'Claude Opus 4.6', costInput: 15, costOutput: 75 },
+  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4.6', costInput: 3, costOutput: 15 },
+  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4.6', costInput: 15, costOutput: 75 },
 ] as const
 
 export type AIModelId = (typeof AI_MODELS)[number]['id']

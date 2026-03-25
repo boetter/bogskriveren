@@ -33,7 +33,7 @@ export default function AIPanel() {
 
   const [prompt, setPrompt] = useState('')
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
-  const [model, setModel] = useState<AIModelId>('claude-sonnet-4-5-20250514')
+  const [model, setModel] = useState<AIModelId>('claude-sonnet-4-20250514')
   const [showPresets, setShowPresets] = useState(false)
   const [mode, setMode] = useState<'process' | 'analyze'>(aiPanelMode)
 
