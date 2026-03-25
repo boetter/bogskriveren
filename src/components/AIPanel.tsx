@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Sparkles,
   X,
@@ -7,10 +7,12 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
+  Search,
+  PenTool,
 } from 'lucide-react'
 import { useBookStore } from '../store'
-import { PRESET_PROMPTS, AI_MODELS } from '../types'
-import type { AIModelId } from '../types'
+import { PRESET_PROMPTS, ANALYSIS_PROMPTS, AI_MODELS } from '../types'
+import type { AIModelId, PresetPrompt } from '../types'
 
 export default function AIPanel() {
   const {
@@ -21,7 +23,9 @@ export default function AIPanel() {
     aiProcessing,
     aiProgress,
     aiError,
+    aiPanelMode,
     processWithAi,
+    analyzeWithAi,
     clearAiSelection,
     toggleAiSelectionMode,
     getSelectedChapterCount,
@@ -29,15 +33,21 @@ export default function AIPanel() {
 
   const [prompt, setPrompt] = useState('')
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
-  const [model, setModel] = useState<AIModelId>('claude-sonnet-4-20250514')
+  const [model, setModel] = useState<AIModelId>('claude-sonnet-4-5-20250514')
   const [showPresets, setShowPresets] = useState(false)
+  const [mode, setMode] = useState<'process' | 'analyze'>(aiPanelMode)
+
+  useEffect(() => {
+    setMode(aiPanelMode)
+  }, [aiPanelMode])
 
   if (!showAiPanel) return null
 
   const selectedCount = getSelectedChapterCount()
+  const presets: PresetPrompt[] = mode === 'process' ? PRESET_PROMPTS : ANALYSIS_PROMPTS
 
   const handlePresetSelect = (presetId: string) => {
-    const preset = PRESET_PROMPTS.find((p) => p.id === presetId)
+    const preset = presets.find((p) => p.id === presetId)
     if (preset) {
       setPrompt(preset.prompt)
       setSelectedPreset(presetId)
@@ -47,7 +57,11 @@ export default function AIPanel() {
 
   const handleProcess = async () => {
     if (!prompt.trim() || selectedCount === 0) return
-    await processWithAi(prompt.trim(), model)
+    if (mode === 'process') {
+      await processWithAi(prompt.trim(), model)
+    } else {
+      await analyzeWithAi(prompt.trim(), model)
+    }
   }
 
   const handleClose = () => {
@@ -57,7 +71,6 @@ export default function AIPanel() {
     toggleAiSelectionMode()
   }
 
-  // Build list of selected chapters for display
   const selectedItems: { sectionTitle: string; chapterTitle: string }[] = []
   for (const [sectionId, chapterIds] of aiSelectedChapters) {
     const section = book.sections.find((s) => s.id === sectionId)
@@ -78,7 +91,7 @@ export default function AIPanel() {
       <div className="px-6 py-4 border-b border-stone-200 flex items-center justify-between bg-gradient-to-r from-indigo-50 to-purple-50">
         <div className="flex items-center gap-2">
           <Sparkles size={20} className="text-indigo-600" />
-          <h2 className="text-lg font-semibold text-stone-800">AI-behandling</h2>
+          <h2 className="text-lg font-semibold text-stone-800">AI-værktøjer</h2>
         </div>
         <button
           onClick={handleClose}
@@ -89,7 +102,50 @@ export default function AIPanel() {
         </button>
       </div>
 
+      {/* Mode toggle */}
+      <div className="px-6 pt-4 pb-2">
+        <div className="flex bg-stone-100 rounded-lg p-0.5">
+          <button
+            onClick={() => {
+              setMode('process')
+              setPrompt('')
+              setSelectedPreset(null)
+            }}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+              mode === 'process'
+                ? 'bg-white shadow text-indigo-700'
+                : 'text-stone-500 hover:text-stone-700'
+            }`}
+          >
+            <PenTool size={14} />
+            Rediger
+          </button>
+          <button
+            onClick={() => {
+              setMode('analyze')
+              setPrompt('')
+              setSelectedPreset(null)
+            }}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+              mode === 'analyze'
+                ? 'bg-white shadow text-indigo-700'
+                : 'text-stone-500 hover:text-stone-700'
+            }`}
+          >
+            <Search size={14} />
+            Analysér
+          </button>
+        </div>
+      </div>
+
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* Mode description */}
+        <div className="bg-stone-50 rounded-lg p-3 text-xs text-stone-500">
+          {mode === 'process'
+            ? 'Redigering ændrer hvert kapitel individuelt. Den originale tekst gemmes som en version.'
+            : 'Analyse sender alle valgte kapitler sammen til AI og gemmer resultatet som en rapport — ingen kapitler ændres.'}
+        </div>
+
         {/* Selected chapters */}
         <div>
           <h3 className="text-sm font-medium text-stone-700 mb-2">
@@ -112,7 +168,9 @@ export default function AIPanel() {
 
         {/* Preset prompts */}
         <div>
-          <h3 className="text-sm font-medium text-stone-700 mb-2">Foruddefinerede prompts</h3>
+          <h3 className="text-sm font-medium text-stone-700 mb-2">
+            {mode === 'process' ? 'Foruddefinerede redigeringer' : 'Foruddefinerede analyser'}
+          </h3>
           <div className="relative">
             <button
               onClick={() => setShowPresets(!showPresets)}
@@ -120,14 +178,14 @@ export default function AIPanel() {
             >
               <span className={selectedPreset ? 'text-stone-800' : 'text-stone-400'}>
                 {selectedPreset
-                  ? PRESET_PROMPTS.find((p) => p.id === selectedPreset)?.label
+                  ? presets.find((p) => p.id === selectedPreset)?.label
                   : 'Vælg en foruddefineret prompt...'}
               </span>
               <ChevronDown size={16} className="text-stone-400" />
             </button>
             {showPresets && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-stone-200 rounded-lg shadow-lg z-10 overflow-hidden">
-                {PRESET_PROMPTS.map((preset) => (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-stone-200 rounded-lg shadow-lg z-10 overflow-hidden max-h-64 overflow-y-auto">
+                {presets.map((preset) => (
                   <button
                     key={preset.id}
                     onClick={() => handlePresetSelect(preset.id)}
@@ -151,7 +209,11 @@ export default function AIPanel() {
               setPrompt(e.target.value)
               setSelectedPreset(null)
             }}
-            placeholder="Skriv din instruktion til AI'en her..."
+            placeholder={
+              mode === 'process'
+                ? 'Skriv din redigeringsinstruktion...'
+                : 'Skriv din analyseopgave...'
+            }
             rows={5}
             className="w-full px-3 py-2.5 border border-stone-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             disabled={aiProcessing}
@@ -190,9 +252,13 @@ export default function AIPanel() {
               ) : null}
               <span className="text-sm font-medium text-stone-700">
                 {aiProcessing
-                  ? `Behandler: ${aiProgress.currentChapterTitle}`
+                  ? mode === 'analyze'
+                    ? 'Analyserer...'
+                    : `Behandler: ${aiProgress.currentChapterTitle}`
                   : isComplete
-                    ? 'Færdig!'
+                    ? mode === 'analyze'
+                      ? 'Analyse færdig! Se resultatet under "Analyser".'
+                      : 'Færdig!'
                     : ''}
               </span>
             </div>
@@ -203,7 +269,8 @@ export default function AIPanel() {
               />
             </div>
             <p className="text-xs text-stone-500 mt-1.5">
-              {aiProgress.current} af {aiProgress.total} kapitler
+              {aiProgress.current} af {aiProgress.total}{' '}
+              {mode === 'analyze' ? '' : 'kapitler'}
             </p>
           </div>
         )}
@@ -227,12 +294,14 @@ export default function AIPanel() {
           {aiProcessing ? (
             <>
               <Loader2 size={18} className="animate-spin" />
-              Behandler...
+              {mode === 'analyze' ? 'Analyserer...' : 'Behandler...'}
             </>
           ) : (
             <>
-              <Play size={18} />
-              Kør AI-behandling ({selectedCount} {selectedCount === 1 ? 'kapitel' : 'kapitler'})
+              {mode === 'process' ? <PenTool size={18} /> : <Search size={18} />}
+              {mode === 'process'
+                ? `Kør AI-redigering (${selectedCount} ${selectedCount === 1 ? 'kapitel' : 'kapitler'})`
+                : `Kør AI-analyse (${selectedCount} ${selectedCount === 1 ? 'kapitel' : 'kapitler'})`}
             </>
           )}
         </button>

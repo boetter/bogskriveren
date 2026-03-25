@@ -14,8 +14,12 @@ import {
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { estimateChapter, estimateSection, formatPages } from '../utils/pageEstimation'
+import { calculateChapterLix, calculateSectionLix } from '../utils/lix'
 import ProgressBar from './ProgressBar'
 import GoalEditor from './GoalEditor'
+import LixDisplay from './LixDisplay'
+import LixGoalEditor from './LixGoalEditor'
+import ExportButton from './ExportButton'
 import type { Section } from '../types'
 
 interface Props {
@@ -31,6 +35,7 @@ export default function SectionView({ section }: Props) {
     moveChapterDown,
     setActiveView,
     setSectionGoal,
+    setSectionLixGoal,
     aiSelectionMode,
     aiSelectedChapters,
     toggleChapterSelection,
@@ -43,6 +48,7 @@ export default function SectionView({ section }: Props) {
   const [editingTitle, setEditingTitle] = useState('')
 
   const sectionEstimate = estimateSection(section)
+  const sectionLix = calculateSectionLix(section)
 
   const handleAddChapter = () => {
     if (!newChapterTitle.trim()) return
@@ -77,27 +83,34 @@ export default function SectionView({ section }: Props) {
                   allSelected ? deselectAllInSection(section.id) : selectAllInSection(section.id)
                 }
                 className="text-indigo-500 hover:text-indigo-700 transition-colors"
-                title={allSelected ? 'Fravælg alle' : 'Vælg alle kapitler'}
               >
                 {allSelected ? <CheckSquare size={22} /> : <Square size={22} />}
               </button>
             )}
             <h1 className="text-3xl font-bold text-stone-900">{section.title}</h1>
           </div>
-          <div className="flex items-center gap-6 mt-3 text-sm text-stone-500">
+          <div className="flex items-center gap-6 mt-3 text-sm text-stone-500 flex-wrap">
             <span>
-              {section.chapters.length}{' '}
-              {section.chapters.length === 1 ? 'kapitel' : 'kapitler'}
+              {section.chapters.length} {section.chapters.length === 1 ? 'kapitel' : 'kapitler'}
             </span>
             <span>{sectionEstimate.words} ord</span>
             <span className="font-medium text-indigo-600">
               ~{formatPages(sectionEstimate.pages)} sider
             </span>
+            <LixDisplay lix={sectionLix} goal={section.goalLix} size="md" />
+          </div>
+          <div className="flex items-center gap-4 mt-3 flex-wrap">
             <GoalEditor
               currentGoal={section.goalPages}
               onSave={(goal) => setSectionGoal(section.id, goal)}
               label="Sæt sidemål"
             />
+            <LixGoalEditor
+              currentGoal={section.goalLix}
+              onSave={(lix) => setSectionLixGoal(section.id, lix)}
+              label="Sæt LIX-mål"
+            />
+            <ExportButton type="section" section={section} />
           </div>
           {section.goalPages && (
             <div className="mt-4 max-w-md">
@@ -110,12 +123,15 @@ export default function SectionView({ section }: Props) {
         <div className="space-y-3 mb-8">
           {section.chapters.map((chapter, idx) => {
             const est = estimateChapter(chapter)
+            const chLix = calculateChapterLix(chapter)
             const selected = isChapterSelected(chapter.id)
             return (
               <div
                 key={chapter.id}
                 className={`bg-white border rounded-xl p-4 hover:border-indigo-300 hover:shadow-sm transition-all group ${
-                  selected ? 'border-indigo-400 bg-indigo-50/30 ring-1 ring-indigo-200' : 'border-stone-200'
+                  selected
+                    ? 'border-indigo-400 bg-indigo-50/30 ring-1 ring-indigo-200'
+                    : 'border-stone-200'
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -158,10 +174,7 @@ export default function SectionView({ section }: Props) {
                     <div className="flex items-center gap-2">
                       <FileText size={16} className="text-indigo-500" />
                       {editingChapterId === chapter.id ? (
-                        <div
-                          className="flex items-center gap-2"
-                          onClick={(e) => e.stopPropagation()}
-                        >
+                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           <input
                             value={editingTitle}
                             onChange={(e) => setEditingTitle(e.target.value)}
@@ -190,9 +203,10 @@ export default function SectionView({ section }: Props) {
                         <span className="font-medium text-stone-800">{chapter.title}</span>
                       )}
                     </div>
-                    <div className="flex items-center gap-4 mt-1.5 text-xs text-stone-400">
+                    <div className="flex items-center gap-4 mt-1.5 text-xs text-stone-400 flex-wrap">
                       <span>{est.words} ord</span>
                       <span>~{formatPages(est.pages)} sider</span>
+                      <LixDisplay lix={chLix} goal={chapter.goalLix} />
                       {chapter.goalPages && (
                         <span
                           className={
@@ -252,7 +266,6 @@ export default function SectionView({ section }: Props) {
           })}
         </div>
 
-        {/* Add chapter */}
         {!aiSelectionMode && (
           <div className="bg-white border-2 border-dashed border-stone-200 rounded-xl p-4 hover:border-indigo-300 transition-colors">
             <div className="flex items-center gap-3">

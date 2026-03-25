@@ -7,13 +7,22 @@ export interface ChapterVersion {
   model?: string
 }
 
+export interface ChapterImage {
+  id: string
+  imageData: string // base64
+  prompt: string
+  createdAt: string
+}
+
 export interface Chapter {
   id: string
   title: string
   content: string // HTML from Tiptap
   goalPages: number | null
+  goalLix: number | null
   order: number
   versions: ChapterVersion[]
+  images: ChapterImage[]
   createdAt: string
   updatedAt: string
 }
@@ -23,6 +32,7 @@ export interface Section {
   title: string
   chapters: Chapter[]
   goalPages: number | null
+  goalLix: number | null
   order: number
   createdAt: string
   updatedAt: string
@@ -32,6 +42,7 @@ export interface Book {
   title: string
   sections: Section[]
   goalPages: number | null
+  goalLix: number | null
   updatedAt: string
 }
 
@@ -55,6 +66,15 @@ export interface ApiCall {
   outputTokens: number
   chapterTitle: string
   prompt: string
+}
+
+export interface AIAnalysis {
+  id: string
+  timestamp: string
+  prompt: string
+  result: string
+  model: string
+  chapterTitles: string[]
 }
 
 export interface PresetPrompt {
@@ -102,9 +122,47 @@ export const PRESET_PROMPTS: PresetPrompt[] = [
   },
 ]
 
+export const ANALYSIS_PROMPTS: PresetPrompt[] = [
+  {
+    id: 'overlap',
+    label: 'Find overlap',
+    description: 'Identificér indhold der gentages på tværs af kapitler',
+    prompt:
+      'Analysér disse kapitler grundigt og identificér alle områder hvor indholdet overlapper eller gentages. For hvert overlap: beskriv præcist hvilke afsnit der dækker det samme emne, og foreslå konkret hvordan overlappet kan elimineres — enten ved at fjerne, flytte eller omformulere indhold.',
+  },
+  {
+    id: 'merge',
+    label: 'Foreslå sammenlægning',
+    description: 'Vurdér om kapitler kan kombineres til færre',
+    prompt:
+      'Vurdér om disse kapitler kan kombineres til færre kapitler. Kom med et konkret forslag til en ny kapitelstruktur: hvad skal hvert nyt kapitel hedde, hvad skal det indeholde, og hvilke dele fra de nuværende kapitler skal indgå. Begrund hvorfor denne struktur er bedre.',
+  },
+  {
+    id: 'consistency',
+    label: 'Tjek konsistens',
+    description: 'Find inkonsistenser i terminologi, tone og budskaber',
+    prompt:
+      'Gennemgå disse kapitler for inkonsistenser. Kig specifikt efter: 1) Terminologi — bruges forskellige ord for det samme koncept? 2) Tone — skifter stilen uhensigtsmæssigt? 3) Budskaber — modsiger kapitlerne hinanden? 4) Fakta — er der tal eller påstande der ikke stemmer overens? List alle fundne problemer med præcise referencer.',
+  },
+  {
+    id: 'flow',
+    label: 'Vurdér flow og rækkefølge',
+    description: 'Er rækkefølgen logisk? Mangler der overgange?',
+    prompt:
+      'Vurdér læseflowet på tværs af disse kapitler. Er rækkefølgen logisk? Bygger hvert kapitel naturligt videre på det foregående? Er der manglende overgange eller begrebsspring? Foreslå en optimal rækkefølge og beskriv hvilke overgange der bør tilføjes.',
+  },
+  {
+    id: 'gaps',
+    label: 'Identificér mangler',
+    description: 'Find emner der mangler at blive dækket',
+    prompt:
+      'Analysér disse kapitler og identificér emner, aspekter eller perspektiver der mangler. Hvad ville en læser forvente at finde, som ikke er med? Er der huller i argumentationen? Foreslå konkret hvilke nye afsnit eller kapitler der bør tilføjes, og hvor de bør placeres.',
+  },
+]
+
 export const AI_MODELS = [
-  { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', costInput: 3, costOutput: 15 },
-  { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', costInput: 15, costOutput: 75 },
+  { id: 'claude-sonnet-4-5-20250514', label: 'Claude Sonnet 4.6', costInput: 3, costOutput: 15 },
+  { id: 'claude-opus-4-5-20250514', label: 'Claude Opus 4.6', costInput: 15, costOutput: 75 },
 ] as const
 
 export type AIModelId = (typeof AI_MODELS)[number]['id']

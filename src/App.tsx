@@ -4,6 +4,7 @@ import BookOverview from './components/BookOverview'
 import SectionView from './components/SectionView'
 import ChapterEditor from './components/ChapterEditor'
 import AIPanel from './components/AIPanel'
+import AnalysesView from './components/AnalysesView'
 
 export default function App() {
   const { book, activeView } = useBookStore()
@@ -18,6 +19,9 @@ export default function App() {
       : undefined
 
   const renderMainContent = () => {
+    if (activeView.type === 'analyses') {
+      return <AnalysesView />
+    }
     if (activeView.type === 'chapter' && activeSection && activeChapter) {
       return <ChapterEditor key={activeChapter.id} section={activeSection} chapter={activeChapter} />
     }
