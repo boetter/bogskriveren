@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Book, Section, Chapter, ApiUsage, AIModelId, AIAnalysis, ChapterImage, ChapterStatusId } from './types'
+import { readSSE } from './utils/sse'
 
 function generateId(): string {
   return crypto.randomUUID()
@@ -619,9 +620,9 @@ export const useBookStore = create<BookStore>((set, get) => {
             }),
           })
 
-          const fetchDuration = Date.now() - fetchStart
-
-          if (!res.ok) {
+          // Non-SSE error (e.g. 400/500 before streaming starts)
+          if (!res.ok && !res.headers.get('content-type')?.includes('text/event-stream')) {
+            const fetchDuration = Date.now() - fetchStart
             let errBody: any = {}
             try { errBody = await res.json() } catch { /* ignore */ }
             addLog('error', `[${i + 1}/${selectedItems.length}] FEJL for "${chapter.title}": HTTP ${res.status} efter ${fetchDuration}ms`, {
@@ -631,23 +632,49 @@ export const useBookStore = create<BookStore>((set, get) => {
             })
             set({ aiDebugInfo: errBody.debug || null })
             failCount++
-            continue // Continue with next chapter instead of stopping
+            continue
           }
 
-          const result = await res.json()
+          // Read SSE stream
+          let resultContent = ''
+          let resultUsage: any = null
+          let resultDebug: any = null
+          let streamError: string | null = null
 
-          addLog('success', `[${i + 1}/${selectedItems.length}] "${chapter.title}" OK (${fetchDuration}ms)`, {
-            inputTokens: result.usage?.inputTokens,
-            outputTokens: result.usage?.outputTokens,
-            resultLength: result.content?.length,
-            ...(result.debug || {}),
+          await readSSE(res, (event) => {
+            if (event.type === 'chunk') {
+              resultContent += event.text
+            } else if (event.type === 'done') {
+              resultContent = event.content || resultContent
+              resultUsage = event.usage
+              resultDebug = event.debug
+            } else if (event.type === 'error') {
+              streamError = event.error
+              resultDebug = event.debug
+            }
           })
 
-          if (result.debug) {
-            set({ aiDebugInfo: result.debug })
+          const fetchDuration = Date.now() - fetchStart
+
+          if (streamError) {
+            addLog('error', `[${i + 1}/${selectedItems.length}] FEJL for "${chapter.title}": ${streamError} (${fetchDuration}ms)`, resultDebug)
+            set({ aiDebugInfo: resultDebug })
+            failCount++
+            continue
           }
 
-          if (!result.content || result.content.trim().length === 0) {
+          addLog('success', `[${i + 1}/${selectedItems.length}] "${chapter.title}" OK (${fetchDuration}ms)`, {
+            inputTokens: resultUsage?.inputTokens,
+            outputTokens: resultUsage?.outputTokens,
+            resultLength: resultContent?.length,
+            ...(resultDebug || {}),
+          })
+
+          if (resultDebug) {
+            set({ aiDebugInfo: resultDebug })
+          }
+
+          if (!resultContent || resultContent.trim().length === 0) {
             addLog('warn', `[${i + 1}/${selectedItems.length}] "${chapter.title}" returnerede tomt indhold — springer over`)
             failCount++
             continue
@@ -752,9 +779,10 @@ export const useBookStore = create<BookStore>((set, get) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chapters, prompt, model }),
         })
-        const fetchDuration = Date.now() - fetchStart
 
-        if (!res.ok) {
+        // Non-SSE error
+        if (!res.ok && !res.headers.get('content-type')?.includes('text/event-stream')) {
+          const fetchDuration = Date.now() - fetchStart
           let errBody: any = {}
           try { errBody = await res.json() } catch { /* ignore */ }
           addLog('error', `FEJL: HTTP ${res.status} efter ${fetchDuration}ms`, {
@@ -765,18 +793,49 @@ export const useBookStore = create<BookStore>((set, get) => {
           throw new Error(errBody.error || 'AI-analyse fejlede')
         }
 
-        const result = await res.json()
-        addLog('success', `Analyse OK (${fetchDuration}ms)`, {
-          inputTokens: result.usage?.inputTokens,
-          outputTokens: result.usage?.outputTokens,
-          resultLength: result.analysis?.result?.length,
-          ...(result.debug || {}),
+        // Read SSE stream
+        let resultAnalysis: any = null
+        let resultUsage: any = null
+        let resultDebug: any = null
+        let streamError: string | null = null
+        let chunkCount = 0
+
+        await readSSE(res, (event) => {
+          if (event.type === 'chunk') {
+            chunkCount++
+            if (chunkCount % 20 === 0) {
+              addLog('info', `Modtager data... (${chunkCount} chunks)`)
+            }
+          } else if (event.type === 'done') {
+            resultAnalysis = event.analysis
+            resultUsage = event.usage
+            resultDebug = event.debug
+          } else if (event.type === 'error') {
+            streamError = event.error
+            resultDebug = event.debug
+          }
         })
 
-        set((s) => ({
-          analyses: [...s.analyses, result.analysis],
-          aiProgress: { current: 1, total: 1, currentChapterTitle: '' },
-        }))
+        const fetchDuration = Date.now() - fetchStart
+
+        if (streamError) {
+          addLog('error', `FEJL: ${streamError} (${fetchDuration}ms)`, resultDebug)
+          throw new Error(streamError)
+        }
+
+        addLog('success', `Analyse OK (${fetchDuration}ms, ${chunkCount} chunks)`, {
+          inputTokens: resultUsage?.inputTokens,
+          outputTokens: resultUsage?.outputTokens,
+          resultLength: resultAnalysis?.result?.length,
+          ...(resultDebug || {}),
+        })
+
+        if (resultAnalysis) {
+          set((s) => ({
+            analyses: [...s.analyses, resultAnalysis],
+            aiProgress: { current: 1, total: 1, currentChapterTitle: '' },
+          }))
+        }
         get().loadApiUsage()
       } catch (error: any) {
         set({ aiError: error.message || 'AI-analyse fejlede' })
@@ -814,14 +873,33 @@ export const useBookStore = create<BookStore>((set, get) => {
           }),
         })
 
-        if (!res.ok) {
+        if (!res.ok && !res.headers.get('content-type')?.includes('text/event-stream')) {
           const err = await res.json()
           set({ aiDebugInfo: err.debug || null })
           throw new Error(err.error || `Fejl ved behandling af "${chapter.title}"`)
         }
 
-        const result = await res.json()
-        if (result.debug) set({ aiDebugInfo: result.debug })
+        let resultContent = ''
+        let resultDebug: any = null
+        let streamError: string | null = null
+
+        await readSSE(res, (event) => {
+          if (event.type === 'chunk') {
+            resultContent += event.text
+          } else if (event.type === 'done') {
+            resultContent = event.content || resultContent
+            resultDebug = event.debug
+          } else if (event.type === 'error') {
+            streamError = event.error
+            resultDebug = event.debug
+          }
+        })
+
+        if (streamError) {
+          set({ aiDebugInfo: resultDebug })
+          throw new Error(streamError)
+        }
+        if (resultDebug) set({ aiDebugInfo: resultDebug })
 
         updateBook((book) => ({
           ...book,
@@ -844,7 +922,7 @@ export const useBookStore = create<BookStore>((set, get) => {
                               model,
                             },
                           ],
-                          content: result.content,
+                          content: resultContent,
                           updatedAt: now(),
                         }
                       : c

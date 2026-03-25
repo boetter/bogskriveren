@@ -10,20 +10,6 @@ interface RequestBody {
   chapterTitle: string;
 }
 
-interface ApiUsage {
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  calls: Array<{
-    id: string;
-    timestamp: string;
-    model: string;
-    inputTokens: number;
-    outputTokens: number;
-    chapterTitle: string;
-    prompt: string;
-  }>;
-}
-
 export default async (req: Request, _context: Context) => {
   const startTime = Date.now();
 
@@ -39,138 +25,131 @@ export default async (req: Request, _context: Context) => {
     );
   }
 
+  let body: RequestBody;
   try {
-    const { content, prompt, model, chapterTitle }: RequestBody = await req.json();
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Ugyldigt JSON-body" }, { status: 400 });
+  }
 
-    if (!content || !prompt || !model) {
-      return Response.json({ error: "Manglende felter: content, prompt, model" }, { status: 400 });
-    }
+  const { content, prompt, model, chapterTitle } = body;
 
-    // Strip HTML to plain text to reduce token count
-    const plainText = htmlToText(content);
-    const debug = contentDebugInfo(content, plainText);
+  if (!content || !prompt || !model) {
+    return Response.json({ error: "Manglende felter: content, prompt, model" }, { status: 400 });
+  }
 
-    console.log(`[ai-process] START: "${chapterTitle}" | model=${model}`);
-    console.log(`[ai-process] Content: HTML=${debug.htmlLength} chars → Plain=${debug.plainTextLength} chars (${debug.reductionPercent}% reduction, ~${debug.estimatedTokens} tokens)`);
+  // Strip HTML to plain text
+  const plainText = htmlToText(content);
+  const debug = contentDebugInfo(content, plainText);
 
-    const client = new Anthropic({ apiKey });
+  console.log(`[ai-process] START: "${chapterTitle}" | model=${model}`);
+  console.log(`[ai-process] Content: HTML=${debug.htmlLength} → Plain=${debug.plainTextLength} chars (${debug.reductionPercent}% reduction)`);
 
-    const apiStartTime = Date.now();
+  const client = new Anthropic({ apiKey });
 
-    // Use streaming to avoid Netlify function timeout (streaming responses get up to 5 min)
-    const stream = await client.messages.stream({
-      model,
-      max_tokens: 16000,
-      system:
-        "Du er en professionel bogredigerer og sprogekspert. Du hjælper med at redigere bogkapitler på dansk. " +
-        "Returnér kun den redigerede tekst i HTML-format (brug <p>, <h2>, <h3>, <strong>, <em>, <ul>, <ol>, <li>, <blockquote> tags efter behov). " +
-        "Tilføj ingen forklaringer, kommentarer eller indledning — kun den redigerede tekst.",
-      messages: [
-        {
-          role: "user",
-          content: `Her er kapitlet:\n\n${plainText}\n\n---\n\nInstruktion: ${prompt}`,
-        },
-      ],
-    });
+  // Stream response via SSE to keep connection alive (extends Netlify timeout to 5 min)
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
 
-    // Collect all text from the stream
-    const finalMessage = await stream.finalMessage();
-    const apiDuration = Date.now() - apiStartTime;
+  const sendEvent = (data: any) => {
+    writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+  };
 
-    const resultContent = finalMessage.content
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("");
-
-    const inputTokens = finalMessage.usage.input_tokens;
-    const outputTokens = finalMessage.usage.output_tokens;
-
-    console.log(`[ai-process] API response in ${apiDuration}ms | input=${inputTokens} tokens, output=${outputTokens} tokens`);
-    console.log(`[ai-process] Result length: ${resultContent.length} chars`);
-
-    // Update API usage tracking
+  // Process in background while streaming
+  (async () => {
     try {
-      const store = getStore("book-data");
-      const existing = await store.get("api-usage", { type: "json" }) as ApiUsage | null;
-
-      const usage: ApiUsage = existing || {
-        totalInputTokens: 0,
-        totalOutputTokens: 0,
-        calls: [],
-      };
-
-      usage.totalInputTokens += inputTokens;
-      usage.totalOutputTokens += outputTokens;
-      usage.calls.push({
-        id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
+      const apiStartTime = Date.now();
+      const stream = client.messages.stream({
         model,
-        inputTokens,
-        outputTokens,
-        chapterTitle,
-        prompt: prompt.substring(0, 200),
+        max_tokens: 16000,
+        system:
+          "Du er en professionel bogredigerer og sprogekspert. Du hjælper med at redigere bogkapitler på dansk. " +
+          "Returnér kun den redigerede tekst i HTML-format (brug <p>, <h2>, <h3>, <strong>, <em>, <ul>, <ol>, <li>, <blockquote> tags efter behov). " +
+          "Tilføj ingen forklaringer, kommentarer eller indledning — kun den redigerede tekst.",
+        messages: [
+          {
+            role: "user",
+            content: `Her er kapitlet:\n\n${plainText}\n\n---\n\nInstruktion: ${prompt}`,
+          },
+        ],
       });
 
-      if (usage.calls.length > 500) {
-        usage.calls = usage.calls.slice(-500);
+      let fullText = "";
+
+      stream.on("text", (text) => {
+        fullText += text;
+        sendEvent({ type: "chunk", text });
+      });
+
+      const finalMessage = await stream.finalMessage();
+      const apiDuration = Date.now() - apiStartTime;
+      const inputTokens = finalMessage.usage.input_tokens;
+      const outputTokens = finalMessage.usage.output_tokens;
+
+      console.log(`[ai-process] Done in ${apiDuration}ms | in=${inputTokens} out=${outputTokens} | result=${fullText.length} chars`);
+
+      // Track API usage
+      try {
+        const store = getStore("book-data");
+        const existing = await store.get("api-usage", { type: "json" }) as any;
+        const usage = existing || { totalInputTokens: 0, totalOutputTokens: 0, calls: [] };
+        usage.totalInputTokens += inputTokens;
+        usage.totalOutputTokens += outputTokens;
+        usage.calls.push({
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          model,
+          inputTokens,
+          outputTokens,
+          chapterTitle,
+          prompt: prompt.substring(0, 200),
+        });
+        if (usage.calls.length > 500) usage.calls = usage.calls.slice(-500);
+        await store.setJSON("api-usage", usage);
+      } catch (e) {
+        console.error("[ai-process] Failed to track usage:", e);
       }
 
-      await store.setJSON("api-usage", usage);
-    } catch (e) {
-      console.error("[ai-process] Failed to track API usage:", e);
-    }
+      const totalDuration = Date.now() - startTime;
 
-    const totalDuration = Date.now() - startTime;
-    console.log(`[ai-process] DONE in ${totalDuration}ms`);
-
-    return Response.json({
-      content: resultContent,
-      usage: { inputTokens, outputTokens },
-      debug: {
-        htmlLength: debug.htmlLength,
-        plainTextLength: debug.plainTextLength,
-        reductionPercent: debug.reductionPercent,
-        estimatedTokens: debug.estimatedTokens,
-        actualInputTokens: inputTokens,
-        actualOutputTokens: outputTokens,
-        apiDurationMs: apiDuration,
-        totalDurationMs: totalDuration,
-      },
-    });
-  } catch (error: any) {
-    const totalDuration = Date.now() - startTime;
-    console.error(`[ai-process] FAILED after ${totalDuration}ms:`, error?.message || error);
-
-    if (error?.status === 401) {
-      return Response.json(
-        { error: "Ugyldig API-nøgle. Tjek din ANTHROPIC_API_KEY.", debug: { errorType: "auth" } },
-        { status: 401 }
-      );
-    }
-    if (error?.status === 429) {
-      return Response.json(
-        { error: "Rate limit nået. Vent lidt og prøv igen.", debug: { errorType: "rate_limit" } },
-        { status: 429 }
-      );
-    }
-    if (error?.status === 400) {
-      return Response.json(
-        {
-          error: `API-fejl: ${error?.message || "Ugyldigt request"}`,
-          debug: { errorType: "bad_request", message: error?.message },
+      sendEvent({
+        type: "done",
+        content: fullText,
+        usage: { inputTokens, outputTokens },
+        debug: {
+          htmlLength: debug.htmlLength,
+          plainTextLength: debug.plainTextLength,
+          reductionPercent: debug.reductionPercent,
+          apiDurationMs: apiDuration,
+          totalDurationMs: totalDuration,
         },
-        { status: 400 }
-      );
-    }
+      });
+    } catch (error: any) {
+      const totalDuration = Date.now() - startTime;
+      console.error(`[ai-process] FAILED after ${totalDuration}ms:`, error?.message);
 
-    return Response.json(
-      {
+      sendEvent({
+        type: "error",
         error: error?.message || "AI-behandling fejlede",
-        debug: { errorType: "unknown", message: error?.message, totalDurationMs: totalDuration },
-      },
-      { status: 500 }
-    );
-  }
+        debug: {
+          errorType: error?.status === 401 ? "auth" : error?.status === 429 ? "rate_limit" : "unknown",
+          status: error?.status,
+          totalDurationMs: totalDuration,
+        },
+      });
+    } finally {
+      writer.close();
+    }
+  })();
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
 };
 
 export const config = {
