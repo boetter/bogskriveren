@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-stone-50 text-stone-900 antialiased;
+  }
+}
+
+/* Tiptap editor styles */
+.tiptap {
+  @apply outline-none min-h-[300px] p-4;
+}
+
+.tiptap p {
+  @apply mb-3;
+}
+
+.tiptap h1 {
+  @apply text-3xl font-bold mb-4 mt-6;
+}
+
+.tiptap h2 {
+  @apply text-2xl font-bold mb-3 mt-5;
+}
+
+.tiptap h3 {
+  @apply text-xl font-semibold mb-2 mt-4;
+}
+
+.tiptap ul {
+  @apply list-disc ml-6 mb-3;
+}
+
+.tiptap ol {
+  @apply list-decimal ml-6 mb-3;
+}
+
+.tiptap li {
+  @apply mb-1;
+}
+
+.tiptap blockquote {
+  @apply border-l-4 border-stone-300 pl-4 italic my-4 text-stone-600;
+}
+
+.tiptap strong {
+  @apply font-bold;
+}
+
+.tiptap em {
+  @apply italic;
+}
+
+.tiptap mark {
+  @apply bg-yellow-200 px-0.5 rounded;
+}
+
+.tiptap code {
+  @apply bg-stone-100 px-1.5 py-0.5 rounded text-sm font-mono;
+}
+
+.tiptap hr {
+  @apply my-6 border-stone-300;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  @apply text-stone-400 float-left h-0 pointer-events-none;
+  content: attr(data-placeholder);
+}
+
+/* Progress bar animations */
+.progress-bar {
+  transition: width 0.5s ease-in-out;
+}

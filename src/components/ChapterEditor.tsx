@@ -1,0 +1,298 @@
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Underline from '@tiptap/extension-underline'
+import Highlight from '@tiptap/extension-highlight'
+import TextAlign from '@tiptap/extension-text-align'
+import Placeholder from '@tiptap/extension-placeholder'
+import { useEffect, useCallback, useRef } from 'react'
+import {
+  Bold,
+  Italic,
+  Underline as UnderlineIcon,
+  Strikethrough,
+  Highlighter,
+  Heading1,
+  Heading2,
+  Heading3,
+  List,
+  ListOrdered,
+  Quote,
+  Minus,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Undo,
+  Redo,
+  ArrowLeft,
+  FileText,
+} from 'lucide-react'
+import { useBookStore } from '../store'
+import { estimateChapter, formatPages } from '../utils/pageEstimation'
+import ProgressBar from './ProgressBar'
+import GoalEditor from './GoalEditor'
+import type { Chapter, Section } from '../types'
+
+function ToolbarButton({
+  onClick,
+  active,
+  children,
+  title,
+}: {
+  onClick: () => void
+  active?: boolean
+  children: React.ReactNode
+  title: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`p-1.5 rounded transition-colors ${
+        active
+          ? 'bg-indigo-100 text-indigo-700'
+          : 'text-stone-500 hover:bg-stone-100 hover:text-stone-700'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ToolbarDivider() {
+  return <div className="w-px h-6 bg-stone-200 mx-1" />
+}
+
+interface Props {
+  section: Section
+  chapter: Chapter
+}
+
+export default function ChapterEditor({ section, chapter }: Props) {
+  const { updateChapterContent, updateChapterTitle, setChapterGoal, setActiveView } = useBookStore()
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+
+  const debouncedUpdate = useCallback(
+    (html: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(() => {
+        updateChapterContent(section.id, chapter.id, html)
+      }, 300)
+    },
+    [section.id, chapter.id, updateChapterContent]
+  )
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Underline,
+      Highlight,
+      TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      Placeholder.configure({
+        placeholder: 'Begynd at skrive dit kapitel her, eller indsæt tekst fra Word...',
+      }),
+    ],
+    content: chapter.content,
+    onUpdate: ({ editor }) => {
+      debouncedUpdate(editor.getHTML())
+    },
+    editorProps: {
+      attributes: {
+        class: 'tiptap prose prose-stone max-w-none',
+      },
+    },
+  })
+
+  useEffect(() => {
+    if (editor && chapter.content !== editor.getHTML()) {
+      editor.commands.setContent(chapter.content)
+    }
+  }, [chapter.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const estimate = estimateChapter(chapter)
+  const iconSize = 16
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="border-b border-stone-200 bg-white px-6 py-4">
+        <div className="flex items-center gap-3 mb-3">
+          <button
+            onClick={() => setActiveView({ type: 'section', sectionId: section.id })}
+            className="text-stone-400 hover:text-indigo-600 transition-colors"
+            title="Tilbage til sektion"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <div className="text-sm text-stone-400">{section.title}</div>
+        </div>
+        <input
+          value={chapter.title}
+          onChange={(e) => updateChapterTitle(section.id, chapter.id, e.target.value)}
+          className="text-2xl font-bold text-stone-900 bg-transparent border-none outline-none w-full placeholder-stone-300"
+          placeholder="Kapiteloverskrift"
+        />
+        <div className="flex items-center gap-6 mt-3 text-sm text-stone-500">
+          <span className="flex items-center gap-1.5">
+            <FileText size={14} />
+            {estimate.words} ord
+          </span>
+          <span>{estimate.characters} tegn</span>
+          <span className="font-medium text-indigo-600">
+            ~{formatPages(estimate.pages)} {estimate.pages === 1 ? 'side' : 'sider'}
+          </span>
+          <GoalEditor
+            currentGoal={chapter.goalPages}
+            onSave={(goal) => setChapterGoal(section.id, chapter.id, goal)}
+            label="Sæt sidemål"
+          />
+        </div>
+        {chapter.goalPages && (
+          <div className="mt-3 max-w-md">
+            <ProgressBar current={estimate.pages} goal={chapter.goalPages} size="sm" />
+          </div>
+        )}
+      </div>
+
+      {/* Toolbar */}
+      {editor && (
+        <div className="border-b border-stone-200 bg-white px-6 py-2 flex flex-wrap items-center gap-0.5">
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleBold().run()}
+            active={editor.isActive('bold')}
+            title="Fed (Ctrl+B)"
+          >
+            <Bold size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            active={editor.isActive('italic')}
+            title="Kursiv (Ctrl+I)"
+          >
+            <Italic size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleUnderline().run()}
+            active={editor.isActive('underline')}
+            title="Understreget (Ctrl+U)"
+          >
+            <UnderlineIcon size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleStrike().run()}
+            active={editor.isActive('strike')}
+            title="Gennemstreget"
+          >
+            <Strikethrough size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleHighlight().run()}
+            active={editor.isActive('highlight')}
+            title="Markér"
+          >
+            <Highlighter size={iconSize} />
+          </ToolbarButton>
+
+          <ToolbarDivider />
+
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+            active={editor.isActive('heading', { level: 1 })}
+            title="Overskrift 1"
+          >
+            <Heading1 size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+            active={editor.isActive('heading', { level: 2 })}
+            title="Overskrift 2"
+          >
+            <Heading2 size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+            active={editor.isActive('heading', { level: 3 })}
+            title="Overskrift 3"
+          >
+            <Heading3 size={iconSize} />
+          </ToolbarButton>
+
+          <ToolbarDivider />
+
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleBulletList().run()}
+            active={editor.isActive('bulletList')}
+            title="Punktliste"
+          >
+            <List size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleOrderedList().run()}
+            active={editor.isActive('orderedList')}
+            title="Nummereret liste"
+          >
+            <ListOrdered size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().toggleBlockquote().run()}
+            active={editor.isActive('blockquote')}
+            title="Citat"
+          >
+            <Quote size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().setHorizontalRule().run()}
+            title="Vandret linje"
+          >
+            <Minus size={iconSize} />
+          </ToolbarButton>
+
+          <ToolbarDivider />
+
+          <ToolbarButton
+            onClick={() => editor.chain().focus().setTextAlign('left').run()}
+            active={editor.isActive({ textAlign: 'left' })}
+            title="Venstrejustér"
+          >
+            <AlignLeft size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().setTextAlign('center').run()}
+            active={editor.isActive({ textAlign: 'center' })}
+            title="Centrér"
+          >
+            <AlignCenter size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().setTextAlign('right').run()}
+            active={editor.isActive({ textAlign: 'right' })}
+            title="Højrejustér"
+          >
+            <AlignRight size={iconSize} />
+          </ToolbarButton>
+
+          <ToolbarDivider />
+
+          <ToolbarButton
+            onClick={() => editor.chain().focus().undo().run()}
+            title="Fortryd (Ctrl+Z)"
+          >
+            <Undo size={iconSize} />
+          </ToolbarButton>
+          <ToolbarButton
+            onClick={() => editor.chain().focus().redo().run()}
+            title="Annuller fortryd (Ctrl+Shift+Z)"
+          >
+            <Redo size={iconSize} />
+          </ToolbarButton>
+        </div>
+      )}
+
+      {/* Editor */}
+      <div className="flex-1 overflow-y-auto bg-white">
+        <div className="max-w-4xl mx-auto py-8 px-8">
+          <EditorContent editor={editor} />
+        </div>
+      </div>
+    </div>
+  )
+}
