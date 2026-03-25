@@ -6,13 +6,6 @@
   directory = "netlify/functions"
   node_bundler = "nft"
 
-# API routes must not be caught by the SPA fallback
-[[redirects]]
-  from = "/api/*"
-  to = "/api/:splat"
-  status = 200
-  force = true
-
 [[redirects]]
   from = "/*"
   to = "/index.html"
