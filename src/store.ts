@@ -11,55 +11,6 @@ function now(): string {
 
 const STORAGE_KEY = 'bogskriveren-data'
 
-// Read Server-Sent Events stream from AI functions
-async function readSSEStream(res: Response): Promise<any> {
-  if (!res.ok) {
-    // Non-streaming error response (validation errors etc.)
-    try {
-      const err = await res.json()
-      return { error: err.error || `Fejl (${res.status})` }
-    } catch {
-      const text = await res.text()
-      return { error: text.substring(0, 200) || `Fejl (${res.status})` }
-    }
-  }
-
-  const reader = res.body?.getReader()
-  if (!reader) {
-    return { error: 'Ingen stream modtaget fra serveren' }
-  }
-
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let lastResult: any = null
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue
-      try {
-        const event = JSON.parse(line.slice(6))
-        if (event.type === 'error') {
-          return { error: event.error }
-        }
-        if (event.type === 'done') {
-          lastResult = event
-        }
-      } catch {
-        // skip
-      }
-    }
-  }
-
-  return lastResult || { error: 'Intet svar modtaget fra AI' }
-}
-
 function ensureChapterFields(chapter: any): Chapter {
   return {
     ...chapter,
@@ -605,11 +556,12 @@ export const useBookStore = create<BookStore>((set, get) => {
             }),
           })
 
-          // Read SSE stream to avoid timeout
-          const result = await readSSEStream(res)
-          if (result.error) {
-            throw new Error(result.error)
+          if (!res.ok) {
+            const err = await res.json()
+            throw new Error(err.error || `Fejl ved behandling af "${chapter.title}"`)
           }
+
+          const result = await res.json()
 
           updateBook((book) => ({
             ...book,
@@ -689,11 +641,12 @@ export const useBookStore = create<BookStore>((set, get) => {
           body: JSON.stringify({ chapters, prompt, model }),
         })
 
-        // Read SSE stream to avoid timeout
-        const result = await readSSEStream(res)
-        if (result.error) {
-          throw new Error(result.error)
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'AI-analyse fejlede')
         }
+
+        const result = await res.json()
         set((s) => ({
           analyses: [...s.analyses, result.analysis],
           aiProgress: { current: 1, total: 1, currentChapterTitle: '' },
