@@ -28,9 +28,14 @@ import {
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { estimateChapter, formatPages } from '../utils/pageEstimation'
+import { calculateChapterLix } from '../utils/lix'
 import ProgressBar from './ProgressBar'
 import GoalEditor from './GoalEditor'
+import LixDisplay from './LixDisplay'
+import LixGoalEditor from './LixGoalEditor'
 import VersionHistory from './VersionHistory'
+import ExportButton from './ExportButton'
+import ImageGenerator from './ImageGenerator'
 import type { Chapter, Section } from '../types'
 
 function ToolbarButton({
@@ -69,7 +74,8 @@ interface Props {
 }
 
 export default function ChapterEditor({ section, chapter }: Props) {
-  const { updateChapterContent, updateChapterTitle, setChapterGoal, setActiveView } = useBookStore()
+  const { updateChapterContent, updateChapterTitle, setChapterGoal, setChapterLixGoal, setActiveView } =
+    useBookStore()
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
 
   const debouncedUpdate = useCallback(
@@ -110,6 +116,7 @@ export default function ChapterEditor({ section, chapter }: Props) {
   }, [chapter.id, chapter.content]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const estimate = estimateChapter(chapter)
+  const lix = calculateChapterLix(chapter)
   const iconSize = 16
 
   return (
@@ -132,7 +139,7 @@ export default function ChapterEditor({ section, chapter }: Props) {
           className="text-2xl font-bold text-stone-900 bg-transparent border-none outline-none w-full placeholder-stone-300"
           placeholder="Kapiteloverskrift"
         />
-        <div className="flex items-center gap-6 mt-3 text-sm text-stone-500 flex-wrap">
+        <div className="flex items-center gap-4 mt-3 text-sm text-stone-500 flex-wrap">
           <span className="flex items-center gap-1.5">
             <FileText size={14} />
             {estimate.words} ord
@@ -141,12 +148,22 @@ export default function ChapterEditor({ section, chapter }: Props) {
           <span className="font-medium text-indigo-600">
             ~{formatPages(estimate.pages)} {estimate.pages === 1 ? 'side' : 'sider'}
           </span>
+          <LixDisplay lix={lix} goal={chapter.goalLix} size="md" />
+        </div>
+        <div className="flex items-center gap-4 mt-2 flex-wrap">
           <GoalEditor
             currentGoal={chapter.goalPages}
             onSave={(goal) => setChapterGoal(section.id, chapter.id, goal)}
-            label="Sæt sidemål"
+            label="Sidemål"
+          />
+          <LixGoalEditor
+            currentGoal={chapter.goalLix}
+            onSave={(lix) => setChapterLixGoal(section.id, chapter.id, lix)}
+            label="LIX-mål"
           />
           <VersionHistory sectionId={section.id} chapter={chapter} />
+          <ExportButton type="chapter" chapter={chapter} />
+          <ImageGenerator sectionId={section.id} chapter={chapter} />
         </div>
         {chapter.goalPages && (
           <div className="mt-3 max-w-md">
@@ -274,10 +291,7 @@ export default function ChapterEditor({ section, chapter }: Props) {
 
           <ToolbarDivider />
 
-          <ToolbarButton
-            onClick={() => editor.chain().focus().undo().run()}
-            title="Fortryd (Ctrl+Z)"
-          >
+          <ToolbarButton onClick={() => editor.chain().focus().undo().run()} title="Fortryd (Ctrl+Z)">
             <Undo size={iconSize} />
           </ToolbarButton>
           <ToolbarButton

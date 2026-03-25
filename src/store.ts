@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Book, Section, Chapter, ApiUsage, AIModelId } from './types'
+import type { Book, Section, Chapter, ApiUsage, AIModelId, AIAnalysis, ChapterImage } from './types'
 
 function generateId(): string {
   return crypto.randomUUID()
@@ -11,19 +11,31 @@ function now(): string {
 
 const STORAGE_KEY = 'bogskriveren-data'
 
+function ensureChapterFields(chapter: any): Chapter {
+  return {
+    ...chapter,
+    versions: chapter.versions || [],
+    images: chapter.images || [],
+    goalLix: chapter.goalLix ?? null,
+  }
+}
+
+function ensureBookFields(book: any): Book {
+  return {
+    ...book,
+    goalLix: book.goalLix ?? null,
+    sections: (book.sections || []).map((s: any) => ({
+      ...s,
+      goalLix: s.goalLix ?? null,
+      chapters: (s.chapters || []).map(ensureChapterFields),
+    })),
+  }
+}
+
 function loadBookLocal(): Book {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) {
-      const book = JSON.parse(stored)
-      // Ensure all chapters have versions array
-      for (const section of book.sections || []) {
-        for (const chapter of section.chapters || []) {
-          if (!chapter.versions) chapter.versions = []
-        }
-      }
-      return book
-    }
+    if (stored) return ensureBookFields(JSON.parse(stored))
   } catch {
     // ignore
   }
@@ -31,6 +43,7 @@ function loadBookLocal(): Book {
     title: 'Min Bog',
     sections: [],
     goalPages: null,
+    goalLix: null,
     updatedAt: now(),
   }
 }
@@ -40,7 +53,7 @@ function saveBookLocal(book: Book) {
 }
 
 interface ActiveView {
-  type: 'overview' | 'section' | 'chapter'
+  type: 'overview' | 'section' | 'chapter' | 'analyses'
   sectionId?: string
   chapterId?: string
 }
@@ -70,11 +83,13 @@ interface BookStore {
   // Book
   updateBookTitle: (title: string) => void
   setBookGoal: (pages: number | null) => void
+  setBookLixGoal: (lix: number | null) => void
 
   // Sections
   addSection: (title: string) => void
   updateSectionTitle: (sectionId: string, title: string) => void
   setSectionGoal: (sectionId: string, pages: number | null) => void
+  setSectionLixGoal: (sectionId: string, lix: number | null) => void
   deleteSection: (sectionId: string) => void
   moveSectionUp: (sectionId: string) => void
   moveSectionDown: (sectionId: string) => void
@@ -84,13 +99,14 @@ interface BookStore {
   updateChapterTitle: (sectionId: string, chapterId: string, title: string) => void
   updateChapterContent: (sectionId: string, chapterId: string, content: string) => void
   setChapterGoal: (sectionId: string, chapterId: string, pages: number | null) => void
+  setChapterLixGoal: (sectionId: string, chapterId: string, lix: number | null) => void
   deleteChapter: (sectionId: string, chapterId: string) => void
   moveChapterUp: (sectionId: string, chapterId: string) => void
   moveChapterDown: (sectionId: string, chapterId: string) => void
 
   // AI selection
   aiSelectionMode: boolean
-  aiSelectedChapters: Map<string, Set<string>> // sectionId -> Set<chapterId>
+  aiSelectedChapters: Map<string, Set<string>>
   toggleAiSelectionMode: () => void
   toggleChapterSelection: (sectionId: string, chapterId: string) => void
   selectAllInSection: (sectionId: string) => void
@@ -104,11 +120,22 @@ interface BookStore {
   aiProgress: AIProgress | null
   aiError: string | null
   showAiPanel: boolean
-  setShowAiPanel: (show: boolean) => void
+  aiPanelMode: 'process' | 'analyze'
+  setShowAiPanel: (show: boolean, mode?: 'process' | 'analyze') => void
   processWithAi: (prompt: string, model: AIModelId) => Promise<void>
+  analyzeWithAi: (prompt: string, model: AIModelId) => Promise<void>
+
+  // Analyses
+  analyses: AIAnalysis[]
+  loadAnalyses: () => Promise<void>
 
   // Version management
   restoreVersion: (sectionId: string, chapterId: string, versionId: string) => void
+
+  // Images
+  generatingImage: boolean
+  imageError: string | null
+  generateImage: (sectionId: string, chapterId: string, customPrompt?: string) => Promise<void>
 
   // API usage
   apiUsage: ApiUsage | null
@@ -124,7 +151,6 @@ export const useBookStore = create<BookStore>((set, get) => {
       saveBookLocal(updated)
       return { book: updated }
     })
-    // Debounced server save
     if (saveDebounceTimer) clearTimeout(saveDebounceTimer)
     saveDebounceTimer = setTimeout(() => {
       get().saveToServer()
@@ -147,6 +173,13 @@ export const useBookStore = create<BookStore>((set, get) => {
     aiProgress: null,
     aiError: null,
     showAiPanel: false,
+    aiPanelMode: 'process',
+    analyses: [],
+
+    // Image state
+    generatingImage: false,
+    imageError: null,
+
     apiUsage: null,
 
     loadFromServer: async () => {
@@ -154,13 +187,7 @@ export const useBookStore = create<BookStore>((set, get) => {
       try {
         const res = await fetch('/api/book-load')
         if (res.ok) {
-          const book = await res.json()
-          // Ensure versions arrays
-          for (const section of book.sections || []) {
-            for (const chapter of section.chapters || []) {
-              if (!chapter.versions) chapter.versions = []
-            }
-          }
+          const book = ensureBookFields(await res.json())
           set({ book, serverAvailable: true })
           saveBookLocal(book)
         } else {
@@ -168,7 +195,6 @@ export const useBookStore = create<BookStore>((set, get) => {
         }
       } catch {
         set({ serverAvailable: false })
-        // Use local data as fallback
       } finally {
         set({ loading: false })
       }
@@ -201,6 +227,7 @@ export const useBookStore = create<BookStore>((set, get) => {
 
     updateBookTitle: (title) => updateBook((book) => ({ ...book, title })),
     setBookGoal: (pages) => updateBook((book) => ({ ...book, goalPages: pages })),
+    setBookLixGoal: (lix) => updateBook((book) => ({ ...book, goalLix: lix })),
 
     addSection: (title) =>
       updateBook((book) => ({
@@ -212,6 +239,7 @@ export const useBookStore = create<BookStore>((set, get) => {
             title,
             chapters: [],
             goalPages: null,
+            goalLix: null,
             order: book.sections.length,
             createdAt: now(),
             updatedAt: now(),
@@ -235,6 +263,14 @@ export const useBookStore = create<BookStore>((set, get) => {
         ),
       })),
 
+    setSectionLixGoal: (sectionId, lix) =>
+      updateBook((book) => ({
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === sectionId ? { ...s, goalLix: lix, updatedAt: now() } : s
+        ),
+      })),
+
     deleteSection: (sectionId) =>
       set((state) => {
         const book = {
@@ -247,7 +283,6 @@ export const useBookStore = create<BookStore>((set, get) => {
           state.activeView.sectionId === sectionId
             ? { type: 'overview' as const }
             : state.activeView
-        // Trigger server save
         if (saveDebounceTimer) clearTimeout(saveDebounceTimer)
         saveDebounceTimer = setTimeout(() => get().saveToServer(), 1000)
         return { book, activeView }
@@ -286,8 +321,10 @@ export const useBookStore = create<BookStore>((set, get) => {
                     title,
                     content: '',
                     goalPages: null,
+                    goalLix: null,
                     order: s.chapters.length,
                     versions: [],
+                    images: [],
                     createdAt: now(),
                     updatedAt: now(),
                   },
@@ -336,6 +373,21 @@ export const useBookStore = create<BookStore>((set, get) => {
                 ...s,
                 chapters: s.chapters.map((c) =>
                   c.id === chapterId ? { ...c, goalPages: pages, updatedAt: now() } : c
+                ),
+              }
+            : s
+        ),
+      })),
+
+    setChapterLixGoal: (sectionId, chapterId, lix) =>
+      updateBook((book) => ({
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === sectionId
+            ? {
+                ...s,
+                chapters: s.chapters.map((c) =>
+                  c.id === chapterId ? { ...c, goalLix: lix, updatedAt: now() } : c
                 ),
               }
             : s
@@ -452,13 +504,13 @@ export const useBookStore = create<BookStore>((set, get) => {
       return count
     },
 
-    setShowAiPanel: (show) => set({ showAiPanel: show }),
+    setShowAiPanel: (show, mode) =>
+      set({ showAiPanel: show, aiPanelMode: mode || 'process' }),
 
     processWithAi: async (prompt, model) => {
       const state = get()
       const { aiSelectedChapters, book } = state
 
-      // Gather selected chapters with their section info
       const selectedItems: { section: Section; chapter: Chapter }[] = []
       for (const [sectionId, chapterIds] of aiSelectedChapters) {
         const section = book.sections.find((s) => s.id === sectionId)
@@ -476,7 +528,11 @@ export const useBookStore = create<BookStore>((set, get) => {
         return
       }
 
-      set({ aiProcessing: true, aiError: null, aiProgress: { current: 0, total: selectedItems.length, currentChapterTitle: '' } })
+      set({
+        aiProcessing: true,
+        aiError: null,
+        aiProgress: { current: 0, total: selectedItems.length, currentChapterTitle: '' },
+      })
 
       try {
         for (let i = 0; i < selectedItems.length; i++) {
@@ -507,7 +563,6 @@ export const useBookStore = create<BookStore>((set, get) => {
 
           const result = await res.json()
 
-          // Save current content as version, then update with AI result
           updateBook((book) => ({
             ...book,
             sections: book.sections.map((s) =>
@@ -541,18 +596,79 @@ export const useBookStore = create<BookStore>((set, get) => {
         }
 
         set({
-          aiProgress: { current: selectedItems.length, total: selectedItems.length, currentChapterTitle: '' },
+          aiProgress: {
+            current: selectedItems.length,
+            total: selectedItems.length,
+            currentChapterTitle: '',
+          },
         })
-
-        // Force immediate save to server
         get().saveToServer()
-
-        // Reload API usage
         get().loadApiUsage()
       } catch (error: any) {
         set({ aiError: error.message || 'AI-behandling fejlede' })
       } finally {
         set({ aiProcessing: false })
+      }
+    },
+
+    analyzeWithAi: async (prompt, model) => {
+      const state = get()
+      const { aiSelectedChapters, book } = state
+
+      const chapters: { title: string; content: string }[] = []
+      for (const [sectionId, chapterIds] of aiSelectedChapters) {
+        const section = book.sections.find((s) => s.id === sectionId)
+        if (!section) continue
+        for (const chapterId of chapterIds) {
+          const chapter = section.chapters.find((c) => c.id === chapterId)
+          if (chapter && chapter.content.trim()) {
+            chapters.push({ title: chapter.title, content: chapter.content })
+          }
+        }
+      }
+
+      if (chapters.length === 0) {
+        set({ aiError: 'Ingen kapitler med indhold er valgt.' })
+        return
+      }
+
+      set({ aiProcessing: true, aiError: null, aiProgress: { current: 0, total: 1, currentChapterTitle: 'Analyserer...' } })
+
+      try {
+        const res = await fetch('/api/ai-analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chapters, prompt, model }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'AI-analyse fejlede')
+        }
+
+        const result = await res.json()
+        set((s) => ({
+          analyses: [...s.analyses, result.analysis],
+          aiProgress: { current: 1, total: 1, currentChapterTitle: '' },
+        }))
+        get().loadApiUsage()
+      } catch (error: any) {
+        set({ aiError: error.message || 'AI-analyse fejlede' })
+      } finally {
+        set({ aiProcessing: false })
+      }
+    },
+
+    // Analyses
+    loadAnalyses: async () => {
+      try {
+        const res = await fetch('/api/load-analyses')
+        if (res.ok) {
+          const analyses = await res.json()
+          set({ analyses })
+        }
+      } catch {
+        // ignore
       }
     },
 
@@ -570,7 +686,6 @@ export const useBookStore = create<BookStore>((set, get) => {
                   if (!version) return c
                   return {
                     ...c,
-                    // Save current as a version before restoring
                     versions: [
                       ...c.versions,
                       {
@@ -588,6 +703,62 @@ export const useBookStore = create<BookStore>((set, get) => {
             : s
         ),
       })),
+
+    // Image generation
+    generateImage: async (sectionId, chapterId, customPrompt) => {
+      const { book } = get()
+      const section = book.sections.find((s) => s.id === sectionId)
+      const chapter = section?.chapters.find((c) => c.id === chapterId)
+      if (!chapter) return
+
+      set({ generatingImage: true, imageError: null })
+
+      try {
+        const res = await fetch('/api/generate-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chapterContent: chapter.content,
+            chapterTitle: chapter.title,
+            customPrompt,
+          }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'Billedgenerering fejlede')
+        }
+
+        const result = await res.json()
+
+        const newImage: ChapterImage = {
+          id: generateId(),
+          imageData: result.imageData,
+          prompt: customPrompt || 'Auto-genereret illustration',
+          createdAt: now(),
+        }
+
+        updateBook((book) => ({
+          ...book,
+          sections: book.sections.map((s) =>
+            s.id === sectionId
+              ? {
+                  ...s,
+                  chapters: s.chapters.map((c) =>
+                    c.id === chapterId
+                      ? { ...c, images: [...c.images, newImage], updatedAt: now() }
+                      : c
+                  ),
+                }
+              : s
+          ),
+        }))
+      } catch (error: any) {
+        set({ imageError: error.message || 'Billedgenerering fejlede' })
+      } finally {
+        set({ generatingImage: false })
+      }
+    },
 
     // API usage
     loadApiUsage: async () => {

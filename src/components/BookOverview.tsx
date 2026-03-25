@@ -13,8 +13,12 @@ import {
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { estimateBook, estimateSection, estimateChapter, formatPages } from '../utils/pageEstimation'
+import { calculateBookLix, calculateSectionLix, calculateChapterLix } from '../utils/lix'
 import ProgressBar from './ProgressBar'
 import GoalEditor from './GoalEditor'
+import LixDisplay from './LixDisplay'
+import LixGoalEditor from './LixGoalEditor'
+import ExportButton from './ExportButton'
 
 export default function BookOverview() {
   const {
@@ -24,6 +28,7 @@ export default function BookOverview() {
     updateSectionTitle,
     updateBookTitle,
     setBookGoal,
+    setBookLixGoal,
     moveSectionUp,
     moveSectionDown,
     setActiveView,
@@ -41,6 +46,7 @@ export default function BookOverview() {
   const [bookTitleDraft, setBookTitleDraft] = useState(book.title)
 
   const bookEstimate = estimateBook(book)
+  const bookLix = calculateBookLix(book)
   const totalChapters = book.sections.reduce((sum, s) => sum + s.chapters.length, 0)
 
   const handleAddSection = () => {
@@ -107,7 +113,7 @@ export default function BookOverview() {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mt-6">
             <div className="bg-white rounded-xl border border-stone-200 p-4">
               <div className="text-2xl font-bold text-indigo-600">{book.sections.length}</div>
               <div className="text-xs text-stone-500 mt-1">Sektioner</div>
@@ -128,15 +134,19 @@ export default function BookOverview() {
               </div>
               <div className="text-xs text-stone-500 mt-1">Bogsider</div>
             </div>
+            <div className="bg-white rounded-xl border border-stone-200 p-4">
+              <div className="text-2xl font-bold text-indigo-600">
+                {bookLix.words > 0 ? bookLix.score : '-'}
+              </div>
+              <div className="text-xs text-stone-500 mt-1">LIX ({bookLix.label})</div>
+            </div>
           </div>
 
-          {/* Book goal */}
-          <div className="mt-4 flex items-center gap-4">
-            <GoalEditor
-              currentGoal={book.goalPages}
-              onSave={setBookGoal}
-              label="Sæt sidemål for bogen"
-            />
+          {/* Goals and export */}
+          <div className="mt-4 flex items-center gap-4 flex-wrap">
+            <GoalEditor currentGoal={book.goalPages} onSave={setBookGoal} label="Sæt sidemål" />
+            <LixGoalEditor currentGoal={book.goalLix} onSave={setBookLixGoal} label="Sæt LIX-mål" />
+            <ExportButton type="book" book={book} />
           </div>
           {book.goalPages && (
             <div className="mt-3 max-w-md">
@@ -154,6 +164,7 @@ export default function BookOverview() {
         <div className="space-y-4 mb-8">
           {book.sections.map((section, idx) => {
             const sectionEst = estimateSection(section)
+            const sectionLix = calculateSectionLix(section)
             const allSelected = isSectionFullySelected(section.id)
             return (
               <div
@@ -162,7 +173,6 @@ export default function BookOverview() {
               >
                 <div className="p-5">
                   <div className="flex items-start gap-3">
-                    {/* AI selection checkbox for section */}
                     {aiSelectionMode && section.chapters.length > 0 && (
                       <button
                         onClick={() =>
@@ -233,7 +243,7 @@ export default function BookOverview() {
                         )}
                       </div>
 
-                      <div className="flex items-center gap-4 text-sm text-stone-500">
+                      <div className="flex items-center gap-4 text-sm text-stone-500 flex-wrap">
                         <span>
                           {section.chapters.length}{' '}
                           {section.chapters.length === 1 ? 'kapitel' : 'kapitler'}
@@ -242,23 +252,20 @@ export default function BookOverview() {
                         <span className="font-medium text-indigo-600">
                           ~{formatPages(sectionEst.pages)} sider
                         </span>
+                        <LixDisplay lix={sectionLix} goal={section.goalLix} />
                       </div>
 
                       {section.goalPages && (
                         <div className="mt-3 max-w-xs">
-                          <ProgressBar
-                            current={sectionEst.pages}
-                            goal={section.goalPages}
-                            size="sm"
-                          />
+                          <ProgressBar current={sectionEst.pages} goal={section.goalPages} size="sm" />
                         </div>
                       )}
 
-                      {/* Chapter preview */}
                       {section.chapters.length > 0 && (
                         <div className="mt-3 space-y-1">
                           {section.chapters.map((ch) => {
                             const chEst = estimateChapter(ch)
+                            const chLix = calculateChapterLix(ch)
                             const chSelected = isChapterSelected(section.id, ch.id)
                             return (
                               <div key={ch.id} className="flex items-center gap-2">
@@ -267,11 +274,7 @@ export default function BookOverview() {
                                     onClick={() => toggleChapterSelection(section.id, ch.id)}
                                     className="text-indigo-500 hover:text-indigo-700 transition-colors"
                                   >
-                                    {chSelected ? (
-                                      <CheckSquare size={15} />
-                                    ) : (
-                                      <Square size={15} />
-                                    )}
+                                    {chSelected ? <CheckSquare size={15} /> : <Square size={15} />}
                                   </button>
                                 )}
                                 <button
@@ -286,8 +289,9 @@ export default function BookOverview() {
                                 >
                                   <FileText size={13} className="shrink-0" />
                                   <span className="truncate">{ch.title}</span>
-                                  <span className="text-xs text-stone-400 shrink-0 ml-auto">
-                                    ~{formatPages(chEst.pages)} s.
+                                  <span className="text-xs text-stone-400 shrink-0 ml-auto flex items-center gap-2">
+                                    {chLix.words > 0 && <span>LIX {chLix.score}</span>}
+                                    <span>~{formatPages(chEst.pages)} s.</span>
                                   </span>
                                 </button>
                               </div>
@@ -310,11 +314,7 @@ export default function BookOverview() {
                       </button>
                       <button
                         onClick={() => {
-                          if (
-                            confirm(
-                              `Slet "${section.title}" og alle ${section.chapters.length} kapitler?`
-                            )
-                          ) {
+                          if (confirm(`Slet "${section.title}" og alle ${section.chapters.length} kapitler?`)) {
                             deleteSection(section.id)
                           }
                         }}
@@ -331,7 +331,6 @@ export default function BookOverview() {
           })}
         </div>
 
-        {/* Add section */}
         {!aiSelectionMode && (
           <div className="bg-white border-2 border-dashed border-stone-200 rounded-xl p-5 hover:border-indigo-300 transition-colors">
             <div className="flex items-center gap-3">

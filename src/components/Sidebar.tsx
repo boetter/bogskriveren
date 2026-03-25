@@ -9,7 +9,8 @@ import {
   Cloud,
   CloudOff,
   Loader2,
-  Check,
+  Search,
+  PenTool,
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { estimateSection, estimateChapter, formatPages } from '../utils/pageEstimation'
@@ -32,11 +33,14 @@ export default function Sidebar() {
     serverAvailable,
     lastSaved,
     loadFromServer,
+    loadAnalyses,
+    analyses,
   } = useBookStore()
 
   useEffect(() => {
     loadFromServer()
-  }, [loadFromServer])
+    loadAnalyses()
+  }, [loadFromServer, loadAnalyses])
 
   const selectedCount = getSelectedChapterCount()
 
@@ -88,7 +92,7 @@ export default function Sidebar() {
           }`}
         >
           <Sparkles size={16} />
-          {aiSelectionMode ? 'Afslut AI-tilstand' : 'AI-behandling'}
+          {aiSelectionMode ? 'Afslut AI-tilstand' : 'AI-værktøjer'}
         </button>
 
         {aiSelectionMode && (
@@ -108,13 +112,22 @@ export default function Sidebar() {
               </button>
             </div>
             {selectedCount > 0 && (
-              <button
-                onClick={() => setShowAiPanel(true)}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
-              >
-                <Sparkles size={14} />
-                Behandl {selectedCount} {selectedCount === 1 ? 'kapitel' : 'kapitler'}
-              </button>
+              <div className="space-y-1.5">
+                <button
+                  onClick={() => setShowAiPanel(true, 'process')}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+                >
+                  <PenTool size={14} />
+                  Rediger ({selectedCount})
+                </button>
+                <button
+                  onClick={() => setShowAiPanel(true, 'analyze')}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors"
+                >
+                  <Search size={14} />
+                  Analysér ({selectedCount})
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -190,9 +203,29 @@ export default function Sidebar() {
             Opret din første sektion.
           </div>
         )}
+
+        {/* Analyses link */}
+        {analyses.length > 0 && (
+          <div className="pt-3 mt-3 border-t border-stone-100">
+            <button
+              onClick={() => setActiveView({ type: 'analyses' })}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
+                activeView.type === 'analyses'
+                  ? 'bg-purple-50 text-purple-700 font-medium'
+                  : 'text-stone-600 hover:bg-stone-50'
+              }`}
+            >
+              <Search size={14} className="shrink-0 text-purple-500" />
+              <span className="flex-1">AI-analyser</span>
+              <span className="text-xs text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded-full">
+                {analyses.length}
+              </span>
+            </button>
+          </div>
+        )}
       </nav>
 
-      {/* Footer with sync status and API usage */}
+      {/* Footer */}
       <div className="px-4 py-3 border-t border-stone-100 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-xs text-stone-400">
           {saving ? (
