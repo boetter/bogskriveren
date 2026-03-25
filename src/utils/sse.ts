@@ -26,6 +26,7 @@ export async function readSSE(
       if (line.startsWith('data: ')) {
         try {
           const data = JSON.parse(line.slice(6))
+          if (data.type === 'ping') continue // skip keepalive events
           onEvent(data)
         } catch {
           // ignore parse errors

@@ -56,9 +56,22 @@ export default async (req: Request, _context: Context) => {
     writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
   };
 
+  // Send immediate heartbeat so Netlify knows the stream is alive
+  sendEvent({ type: "ping" });
+
   // Process in background while streaming
   (async () => {
     try {
+      // Send periodic keepalives until first Anthropic token arrives
+      let gotFirstToken = false;
+      const keepalive = setInterval(() => {
+        if (!gotFirstToken) {
+          sendEvent({ type: "ping" });
+        } else {
+          clearInterval(keepalive);
+        }
+      }, 5000);
+
       const apiStartTime = Date.now();
       const stream = client.messages.stream({
         model,
@@ -78,6 +91,10 @@ export default async (req: Request, _context: Context) => {
       let fullText = "";
 
       stream.on("text", (text) => {
+        if (!gotFirstToken) {
+          gotFirstToken = true;
+          clearInterval(keepalive);
+        }
         fullText += text;
         sendEvent({ type: "chunk", text });
       });
@@ -126,6 +143,7 @@ export default async (req: Request, _context: Context) => {
         },
       });
     } catch (error: any) {
+      clearInterval(keepalive);
       const totalDuration = Date.now() - startTime;
       console.error(`[ai-process] FAILED after ${totalDuration}ms:`, error?.message);
 
