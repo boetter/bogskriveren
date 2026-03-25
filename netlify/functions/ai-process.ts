@@ -42,6 +42,7 @@ export default async (req: Request, _context: Context) => {
       return Response.json({ error: "Manglende felter: content, prompt, model" }, { status: 400 });
     }
 
+    // Use streaming to avoid Netlify Function timeout
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -52,6 +53,7 @@ export default async (req: Request, _context: Context) => {
       body: JSON.stringify({
         model,
         max_tokens: 16000,
+        stream: true,
         system:
           "Du er en professionel bogredigerer og sprogekspert. Du hjælper med at redigere bogkapitler på dansk. " +
           "Returnér kun den redigerede tekst i HTML-format (brug <p>, <h2>, <h3>, <strong>, <em>, <ul>, <ol>, <li>, <blockquote> tags efter behov). " +
@@ -80,15 +82,41 @@ export default async (req: Request, _context: Context) => {
       return Response.json({ error: errorMsg }, { status: response.status });
     }
 
-    const data = await response.json() as any;
+    // Read the SSE stream and collect the full response
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let resultContent = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let buffer = "";
 
-    const resultContent = data.content
-      .filter((block: any) => block.type === "text")
-      .map((block: any) => block.text)
-      .join("");
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    const inputTokens = data.usage.input_tokens;
-    const outputTokens = data.usage.output_tokens;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") continue;
+
+        try {
+          const event = JSON.parse(data);
+          if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+            resultContent += event.delta.text;
+          } else if (event.type === "message_delta" && event.usage) {
+            outputTokens = event.usage.output_tokens;
+          } else if (event.type === "message_start" && event.message?.usage) {
+            inputTokens = event.message.usage.input_tokens;
+          }
+        } catch {
+          // skip unparseable lines
+        }
+      }
+    }
 
     // Update API usage tracking
     try {
@@ -113,7 +141,6 @@ export default async (req: Request, _context: Context) => {
         prompt: prompt.substring(0, 200),
       });
 
-      // Keep only last 500 calls to avoid bloat
       if (usage.calls.length > 500) {
         usage.calls = usage.calls.slice(-500);
       }

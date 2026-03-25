@@ -41,6 +41,7 @@ export default async (req: Request, _context: Context) => {
       .map((ch, i) => `--- Kapitel ${i + 1}: ${ch.title} ---\n\n${ch.content}`)
       .join("\n\n\n");
 
+    // Use streaming to avoid Netlify Function timeout
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -51,6 +52,7 @@ export default async (req: Request, _context: Context) => {
       body: JSON.stringify({
         model,
         max_tokens: 8000,
+        stream: true,
         system:
           "Du er en professionel bogredigerer og analytiker. Du hjælper med at analysere bogkapitler på dansk. " +
           "Din opgave er at give en grundig, konkret og handlingsorienteret analyse baseret på de kapitler du modtager. " +
@@ -79,15 +81,41 @@ export default async (req: Request, _context: Context) => {
       return Response.json({ error: errorMsg }, { status: response.status });
     }
 
-    const data = await response.json() as any;
+    // Read the SSE stream and collect the full response
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let resultContent = "";
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let buffer = "";
 
-    const resultContent = data.content
-      .filter((block: any) => block.type === "text")
-      .map((block: any) => block.text)
-      .join("");
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    const inputTokens = data.usage.input_tokens;
-    const outputTokens = data.usage.output_tokens;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") continue;
+
+        try {
+          const event = JSON.parse(data);
+          if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+            resultContent += event.delta.text;
+          } else if (event.type === "message_delta" && event.usage) {
+            outputTokens = event.usage.output_tokens;
+          } else if (event.type === "message_start" && event.message?.usage) {
+            inputTokens = event.message.usage.input_tokens;
+          }
+        } catch {
+          // skip unparseable lines
+        }
+      }
+    }
 
     // Store the analysis
     const analysis: AnalysisEntry = {
@@ -104,7 +132,6 @@ export default async (req: Request, _context: Context) => {
       const existing = (await store.get("analyses", { type: "json" })) as AnalysisEntry[] | null;
       const analyses = existing || [];
       analyses.push(analysis);
-      // Keep last 50 analyses
       if (analyses.length > 50) analyses.splice(0, analyses.length - 50);
       await store.setJSON("analyses", analyses);
     } catch (e) {
