@@ -8,6 +8,9 @@ import {
   ArrowLeft,
   Pencil,
   Check,
+  Square,
+  CheckSquare,
+  History,
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { estimateChapter, estimateSection, formatPages } from '../utils/pageEstimation'
@@ -28,6 +31,11 @@ export default function SectionView({ section }: Props) {
     moveChapterDown,
     setActiveView,
     setSectionGoal,
+    aiSelectionMode,
+    aiSelectedChapters,
+    toggleChapterSelection,
+    selectAllInSection,
+    deselectAllInSection,
   } = useBookStore()
 
   const [newChapterTitle, setNewChapterTitle] = useState('')
@@ -42,6 +50,14 @@ export default function SectionView({ section }: Props) {
     setNewChapterTitle('')
   }
 
+  const isChapterSelected = (chapterId: string) => {
+    return aiSelectedChapters.get(section.id)?.has(chapterId) || false
+  }
+
+  const allSelected =
+    section.chapters.length > 0 &&
+    aiSelectedChapters.get(section.id)?.size === section.chapters.length
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-4xl mx-auto px-6 py-8">
@@ -54,9 +70,25 @@ export default function SectionView({ section }: Props) {
             <ArrowLeft size={16} />
             Bogoversigt
           </button>
-          <h1 className="text-3xl font-bold text-stone-900 mb-3">{section.title}</h1>
-          <div className="flex items-center gap-6 text-sm text-stone-500">
-            <span>{section.chapters.length} {section.chapters.length === 1 ? 'kapitel' : 'kapitler'}</span>
+          <div className="flex items-center gap-3">
+            {aiSelectionMode && section.chapters.length > 0 && (
+              <button
+                onClick={() =>
+                  allSelected ? deselectAllInSection(section.id) : selectAllInSection(section.id)
+                }
+                className="text-indigo-500 hover:text-indigo-700 transition-colors"
+                title={allSelected ? 'Fravælg alle' : 'Vælg alle kapitler'}
+              >
+                {allSelected ? <CheckSquare size={22} /> : <Square size={22} />}
+              </button>
+            )}
+            <h1 className="text-3xl font-bold text-stone-900">{section.title}</h1>
+          </div>
+          <div className="flex items-center gap-6 mt-3 text-sm text-stone-500">
+            <span>
+              {section.chapters.length}{' '}
+              {section.chapters.length === 1 ? 'kapitel' : 'kapitler'}
+            </span>
             <span>{sectionEstimate.words} ord</span>
             <span className="font-medium text-indigo-600">
               ~{formatPages(sectionEstimate.pages)} sider
@@ -78,12 +110,24 @@ export default function SectionView({ section }: Props) {
         <div className="space-y-3 mb-8">
           {section.chapters.map((chapter, idx) => {
             const est = estimateChapter(chapter)
+            const selected = isChapterSelected(chapter.id)
             return (
               <div
                 key={chapter.id}
-                className="bg-white border border-stone-200 rounded-xl p-4 hover:border-indigo-300 hover:shadow-sm transition-all group"
+                className={`bg-white border rounded-xl p-4 hover:border-indigo-300 hover:shadow-sm transition-all group ${
+                  selected ? 'border-indigo-400 bg-indigo-50/30 ring-1 ring-indigo-200' : 'border-stone-200'
+                }`}
               >
                 <div className="flex items-center gap-3">
+                  {aiSelectionMode && (
+                    <button
+                      onClick={() => toggleChapterSelection(section.id, chapter.id)}
+                      className="text-indigo-500 hover:text-indigo-700 transition-colors"
+                    >
+                      {selected ? <CheckSquare size={18} /> : <Square size={18} />}
+                    </button>
+                  )}
+
                   <div className="flex flex-col gap-0.5">
                     <button
                       onClick={() => moveChapterUp(section.id, chapter.id)}
@@ -103,14 +147,21 @@ export default function SectionView({ section }: Props) {
 
                   <button
                     onClick={() =>
-                      setActiveView({ type: 'chapter', sectionId: section.id, chapterId: chapter.id })
+                      setActiveView({
+                        type: 'chapter',
+                        sectionId: section.id,
+                        chapterId: chapter.id,
+                      })
                     }
                     className="flex-1 text-left"
                   >
                     <div className="flex items-center gap-2">
                       <FileText size={16} className="text-indigo-500" />
                       {editingChapterId === chapter.id ? (
-                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <div
+                          className="flex items-center gap-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <input
                             value={editingTitle}
                             onChange={(e) => setEditingTitle(e.target.value)}
@@ -143,14 +194,29 @@ export default function SectionView({ section }: Props) {
                       <span>{est.words} ord</span>
                       <span>~{formatPages(est.pages)} sider</span>
                       {chapter.goalPages && (
-                        <span className={est.pages > chapter.goalPages ? 'text-amber-500' : 'text-emerald-500'}>
+                        <span
+                          className={
+                            est.pages > chapter.goalPages ? 'text-amber-500' : 'text-emerald-500'
+                          }
+                        >
                           Mål: {chapter.goalPages} sider
+                        </span>
+                      )}
+                      {chapter.versions.length > 0 && (
+                        <span className="flex items-center gap-1 text-indigo-400">
+                          <History size={11} />
+                          {chapter.versions.length} vers.
                         </span>
                       )}
                     </div>
                     {chapter.goalPages && (
                       <div className="mt-2 max-w-xs">
-                        <ProgressBar current={est.pages} goal={chapter.goalPages} showNumbers={false} size="sm" />
+                        <ProgressBar
+                          current={est.pages}
+                          goal={chapter.goalPages}
+                          showNumbers={false}
+                          size="sm"
+                        />
                       </div>
                     )}
                   </button>
@@ -187,25 +253,27 @@ export default function SectionView({ section }: Props) {
         </div>
 
         {/* Add chapter */}
-        <div className="bg-white border-2 border-dashed border-stone-200 rounded-xl p-4 hover:border-indigo-300 transition-colors">
-          <div className="flex items-center gap-3">
-            <Plus size={18} className="text-indigo-500" />
-            <input
-              value={newChapterTitle}
-              onChange={(e) => setNewChapterTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddChapter()}
-              placeholder="Nyt kapitel..."
-              className="flex-1 bg-transparent outline-none text-stone-700 placeholder-stone-400"
-            />
-            <button
-              onClick={handleAddChapter}
-              disabled={!newChapterTitle.trim()}
-              className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              Tilføj
-            </button>
+        {!aiSelectionMode && (
+          <div className="bg-white border-2 border-dashed border-stone-200 rounded-xl p-4 hover:border-indigo-300 transition-colors">
+            <div className="flex items-center gap-3">
+              <Plus size={18} className="text-indigo-500" />
+              <input
+                value={newChapterTitle}
+                onChange={(e) => setNewChapterTitle(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddChapter()}
+                placeholder="Nyt kapitel..."
+                className="flex-1 bg-transparent outline-none text-stone-700 placeholder-stone-400"
+              />
+              <button
+                onClick={handleAddChapter}
+                disabled={!newChapterTitle.trim()}
+                className="px-4 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Tilføj
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )

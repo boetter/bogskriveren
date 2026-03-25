@@ -8,6 +8,8 @@ import {
   Pencil,
   Check,
   FileText,
+  Square,
+  CheckSquare,
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { estimateBook, estimateSection, estimateChapter, formatPages } from '../utils/pageEstimation'
@@ -25,6 +27,11 @@ export default function BookOverview() {
     moveSectionUp,
     moveSectionDown,
     setActiveView,
+    aiSelectionMode,
+    aiSelectedChapters,
+    toggleChapterSelection,
+    selectAllInSection,
+    deselectAllInSection,
   } = useBookStore()
 
   const [newSectionTitle, setNewSectionTitle] = useState('')
@@ -40,6 +47,17 @@ export default function BookOverview() {
     if (!newSectionTitle.trim()) return
     addSection(newSectionTitle.trim())
     setNewSectionTitle('')
+  }
+
+  const isSectionFullySelected = (sectionId: string) => {
+    const section = book.sections.find((s) => s.id === sectionId)
+    if (!section || section.chapters.length === 0) return false
+    const selected = aiSelectedChapters.get(sectionId)
+    return selected?.size === section.chapters.length
+  }
+
+  const isChapterSelected = (sectionId: string, chapterId: string) => {
+    return aiSelectedChapters.get(sectionId)?.has(chapterId) || false
   }
 
   return (
@@ -136,6 +154,7 @@ export default function BookOverview() {
         <div className="space-y-4 mb-8">
           {book.sections.map((section, idx) => {
             const sectionEst = estimateSection(section)
+            const allSelected = isSectionFullySelected(section.id)
             return (
               <div
                 key={section.id}
@@ -143,6 +162,21 @@ export default function BookOverview() {
               >
                 <div className="p-5">
                   <div className="flex items-start gap-3">
+                    {/* AI selection checkbox for section */}
+                    {aiSelectionMode && section.chapters.length > 0 && (
+                      <button
+                        onClick={() =>
+                          allSelected
+                            ? deselectAllInSection(section.id)
+                            : selectAllInSection(section.id)
+                        }
+                        className="mt-1 text-indigo-500 hover:text-indigo-700 transition-colors"
+                        title={allSelected ? 'Fravælg alle' : 'Vælg alle kapitler'}
+                      >
+                        {allSelected ? <CheckSquare size={18} /> : <Square size={18} />}
+                      </button>
+                    )}
+
                     <div className="flex flex-col gap-0.5 mt-1">
                       <button
                         onClick={() => moveSectionUp(section.id)}
@@ -225,24 +259,38 @@ export default function BookOverview() {
                         <div className="mt-3 space-y-1">
                           {section.chapters.map((ch) => {
                             const chEst = estimateChapter(ch)
+                            const chSelected = isChapterSelected(section.id, ch.id)
                             return (
-                              <button
-                                key={ch.id}
-                                onClick={() =>
-                                  setActiveView({
-                                    type: 'chapter',
-                                    sectionId: section.id,
-                                    chapterId: ch.id,
-                                  })
-                                }
-                                className="flex items-center gap-2 text-sm text-stone-500 hover:text-indigo-600 transition-colors w-full text-left py-0.5"
-                              >
-                                <FileText size={13} className="shrink-0" />
-                                <span className="truncate">{ch.title}</span>
-                                <span className="text-xs text-stone-400 shrink-0 ml-auto">
-                                  ~{formatPages(chEst.pages)} s.
-                                </span>
-                              </button>
+                              <div key={ch.id} className="flex items-center gap-2">
+                                {aiSelectionMode && (
+                                  <button
+                                    onClick={() => toggleChapterSelection(section.id, ch.id)}
+                                    className="text-indigo-500 hover:text-indigo-700 transition-colors"
+                                  >
+                                    {chSelected ? (
+                                      <CheckSquare size={15} />
+                                    ) : (
+                                      <Square size={15} />
+                                    )}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() =>
+                                    setActiveView({
+                                      type: 'chapter',
+                                      sectionId: section.id,
+                                      chapterId: ch.id,
+                                    })
+                                  }
+                                  className="flex items-center gap-2 text-sm text-stone-500 hover:text-indigo-600 transition-colors text-left py-0.5 flex-1"
+                                >
+                                  <FileText size={13} className="shrink-0" />
+                                  <span className="truncate">{ch.title}</span>
+                                  <span className="text-xs text-stone-400 shrink-0 ml-auto">
+                                    ~{formatPages(chEst.pages)} s.
+                                  </span>
+                                </button>
+                              </div>
                             )
                           })}
                         </div>
@@ -284,25 +332,27 @@ export default function BookOverview() {
         </div>
 
         {/* Add section */}
-        <div className="bg-white border-2 border-dashed border-stone-200 rounded-xl p-5 hover:border-indigo-300 transition-colors">
-          <div className="flex items-center gap-3">
-            <Plus size={20} className="text-indigo-500" />
-            <input
-              value={newSectionTitle}
-              onChange={(e) => setNewSectionTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddSection()}
-              placeholder="Ny sektion..."
-              className="flex-1 bg-transparent outline-none text-stone-700 placeholder-stone-400"
-            />
-            <button
-              onClick={handleAddSection}
-              disabled={!newSectionTitle.trim()}
-              className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              Tilføj sektion
-            </button>
+        {!aiSelectionMode && (
+          <div className="bg-white border-2 border-dashed border-stone-200 rounded-xl p-5 hover:border-indigo-300 transition-colors">
+            <div className="flex items-center gap-3">
+              <Plus size={20} className="text-indigo-500" />
+              <input
+                value={newSectionTitle}
+                onChange={(e) => setNewSectionTitle(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddSection()}
+                placeholder="Ny sektion..."
+                className="flex-1 bg-transparent outline-none text-stone-700 placeholder-stone-400"
+              />
+              <button
+                onClick={handleAddSection}
+                disabled={!newSectionTitle.trim()}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Tilføj sektion
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )

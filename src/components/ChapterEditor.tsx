@@ -30,6 +30,7 @@ import { useBookStore } from '../store'
 import { estimateChapter, formatPages } from '../utils/pageEstimation'
 import ProgressBar from './ProgressBar'
 import GoalEditor from './GoalEditor'
+import VersionHistory from './VersionHistory'
 import type { Chapter, Section } from '../types'
 
 function ToolbarButton({
@@ -106,7 +107,7 @@ export default function ChapterEditor({ section, chapter }: Props) {
     if (editor && chapter.content !== editor.getHTML()) {
       editor.commands.setContent(chapter.content)
     }
-  }, [chapter.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chapter.id, chapter.content]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const estimate = estimateChapter(chapter)
   const iconSize = 16
@@ -131,7 +132,7 @@ export default function ChapterEditor({ section, chapter }: Props) {
           className="text-2xl font-bold text-stone-900 bg-transparent border-none outline-none w-full placeholder-stone-300"
           placeholder="Kapiteloverskrift"
         />
-        <div className="flex items-center gap-6 mt-3 text-sm text-stone-500">
+        <div className="flex items-center gap-6 mt-3 text-sm text-stone-500 flex-wrap">
           <span className="flex items-center gap-1.5">
             <FileText size={14} />
             {estimate.words} ord
@@ -145,6 +146,7 @@ export default function ChapterEditor({ section, chapter }: Props) {
             onSave={(goal) => setChapterGoal(section.id, chapter.id, goal)}
             label="Sæt sidemål"
           />
+          <VersionHistory sectionId={section.id} chapter={chapter} />
         </div>
         {chapter.goalPages && (
           <div className="mt-3 max-w-md">
