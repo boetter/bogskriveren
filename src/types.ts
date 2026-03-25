@@ -14,6 +14,16 @@ export interface ChapterImage {
   createdAt: string
 }
 
+export const CHAPTER_STATUSES = [
+  { id: 'ikke-paabegyndt', label: 'Ikke påbegyndt', color: 'stone' },
+  { id: 'udarbejdes', label: 'Ved at blive udarbejdet', color: 'blue' },
+  { id: 'sendt-korrektur', label: 'Sendt til korrektur', color: 'amber' },
+  { id: 'korrektur-indarbejdet', label: 'Korrektur indarbejdet', color: 'purple' },
+  { id: 'klar-til-tryk', label: 'Klar til tryk', color: 'emerald' },
+] as const
+
+export type ChapterStatusId = (typeof CHAPTER_STATUSES)[number]['id']
+
 export interface Chapter {
   id: string
   title: string
@@ -23,6 +33,10 @@ export interface Chapter {
   order: number
   versions: ChapterVersion[]
   images: ChapterImage[]
+  status: ChapterStatusId
+  keywords: string[]
+  score: number | null
+  scoreQuestion: string | null
   createdAt: string
   updatedAt: string
 }
@@ -161,8 +175,9 @@ export const ANALYSIS_PROMPTS: PresetPrompt[] = [
 ]
 
 export const AI_MODELS = [
-  { id: 'claude-sonnet-4-5-20250514', label: 'Claude Sonnet 4.6', costInput: 3, costOutput: 15 },
-  { id: 'claude-opus-4-5-20250514', label: 'Claude Opus 4.6', costInput: 15, costOutput: 75 },
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', costInput: 0.8, costOutput: 4 },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', costInput: 3, costOutput: 15 },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', costInput: 15, costOutput: 75 },
 ] as const
 
 export type AIModelId = (typeof AI_MODELS)[number]['id']

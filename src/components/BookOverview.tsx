@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Plus,
   BookOpen,
@@ -10,6 +10,8 @@ import {
   FileText,
   Square,
   CheckSquare,
+  Filter,
+  X,
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { estimateBook, estimateSection, estimateChapter, formatPages } from '../utils/pageEstimation'
@@ -19,6 +21,9 @@ import GoalEditor from './GoalEditor'
 import LixDisplay from './LixDisplay'
 import LixGoalEditor from './LixGoalEditor'
 import ExportButton from './ExportButton'
+import ChapterStatusDropdown from './ChapterStatusDropdown'
+import { CHAPTER_STATUSES } from '../types'
+import type { ChapterStatusId } from '../types'
 
 export default function BookOverview() {
   const {
@@ -37,6 +42,7 @@ export default function BookOverview() {
     toggleChapterSelection,
     selectAllInSection,
     deselectAllInSection,
+    setChapterStatus,
   } = useBookStore()
 
   const [newSectionTitle, setNewSectionTitle] = useState('')
@@ -44,6 +50,19 @@ export default function BookOverview() {
   const [editingTitle, setEditingTitle] = useState('')
   const [editingBookTitle, setEditingBookTitle] = useState(false)
   const [bookTitleDraft, setBookTitleDraft] = useState(book.title)
+  const [filterStatus, setFilterStatus] = useState<ChapterStatusId | null>(null)
+  const [filterKeyword, setFilterKeyword] = useState<string | null>(null)
+
+  // Collect all unique keywords from all chapters
+  const allKeywords = useMemo(() => {
+    const kws = new Set<string>()
+    for (const s of book.sections) {
+      for (const c of s.chapters) {
+        for (const kw of c.keywords || []) kws.add(kw)
+      }
+    }
+    return Array.from(kws).sort()
+  }, [book])
 
   const bookEstimate = estimateBook(book)
   const bookLix = calculateBookLix(book)
@@ -159,6 +178,48 @@ export default function BookOverview() {
           )}
         </div>
 
+        {/* Filters */}
+        {(allKeywords.length > 0 || book.sections.some((s) => s.chapters.some((c) => c.status && c.status !== 'ikke-paabegyndt'))) && (
+          <div className="mb-6 bg-white border border-stone-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Filter size={14} className="text-stone-400" />
+              <span className="text-sm font-medium text-stone-600">Filtrér kapitler</span>
+              {(filterStatus || filterKeyword) && (
+                <button
+                  onClick={() => { setFilterStatus(null); setFilterKeyword(null) }}
+                  className="ml-auto text-xs text-stone-400 hover:text-stone-600 flex items-center gap-1"
+                >
+                  <X size={12} /> Ryd filtre
+                </button>
+              )}
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <select
+                value={filterStatus || ''}
+                onChange={(e) => setFilterStatus((e.target.value || null) as ChapterStatusId | null)}
+                className="px-2.5 py-1.5 text-xs border border-stone-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="">Alle statusser</option>
+                {CHAPTER_STATUSES.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </select>
+              {allKeywords.length > 0 && (
+                <select
+                  value={filterKeyword || ''}
+                  onChange={(e) => setFilterKeyword(e.target.value || null)}
+                  className="px-2.5 py-1.5 text-xs border border-stone-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="">Alle nøgleord</option>
+                  {allKeywords.map((kw) => (
+                    <option key={kw} value={kw}>{kw}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Sections */}
         <h2 className="text-lg font-semibold text-stone-700 mb-4">Sektioner</h2>
         <div className="space-y-4 mb-8">
@@ -262,8 +323,14 @@ export default function BookOverview() {
                       )}
 
                       {section.chapters.length > 0 && (
-                        <div className="mt-3 space-y-1">
-                          {section.chapters.map((ch) => {
+                        <div className="mt-3 space-y-1.5">
+                          {section.chapters
+                            .filter((ch) => {
+                              if (filterStatus && (ch.status || 'ikke-paabegyndt') !== filterStatus) return false
+                              if (filterKeyword && !(ch.keywords || []).includes(filterKeyword)) return false
+                              return true
+                            })
+                            .map((ch) => {
                             const chEst = estimateChapter(ch)
                             const chLix = calculateChapterLix(ch)
                             const chSelected = isChapterSelected(section.id, ch.id)
@@ -277,23 +344,45 @@ export default function BookOverview() {
                                     {chSelected ? <CheckSquare size={15} /> : <Square size={15} />}
                                   </button>
                                 )}
-                                <button
-                                  onClick={() =>
-                                    setActiveView({
-                                      type: 'chapter',
-                                      sectionId: section.id,
-                                      chapterId: ch.id,
-                                    })
-                                  }
-                                  className="flex items-center gap-2 text-sm text-stone-500 hover:text-indigo-600 transition-colors text-left py-0.5 flex-1"
-                                >
-                                  <FileText size={13} className="shrink-0" />
-                                  <span className="truncate">{ch.title}</span>
-                                  <span className="text-xs text-stone-400 shrink-0 ml-auto flex items-center gap-2">
-                                    {chLix.words > 0 && <span>LIX {chLix.score}</span>}
-                                    <span>~{formatPages(chEst.pages)} s.</span>
-                                  </span>
-                                </button>
+                                <div className="flex-1 min-w-0">
+                                  <button
+                                    onClick={() =>
+                                      setActiveView({
+                                        type: 'chapter',
+                                        sectionId: section.id,
+                                        chapterId: ch.id,
+                                      })
+                                    }
+                                    className="flex items-center gap-2 text-sm text-stone-500 hover:text-indigo-600 transition-colors text-left py-0.5 w-full"
+                                  >
+                                    <FileText size={13} className="shrink-0" />
+                                    <span className="truncate">{ch.title}</span>
+                                    <span className="text-xs text-stone-400 shrink-0 ml-auto flex items-center gap-2">
+                                      {ch.score !== null && (
+                                        <span className={`font-medium ${ch.score >= 70 ? 'text-emerald-500' : ch.score >= 40 ? 'text-amber-500' : 'text-red-400'}`}>
+                                          {ch.score}
+                                        </span>
+                                      )}
+                                      {chLix.words > 0 && <span>LIX {chLix.score}</span>}
+                                      <span>~{formatPages(chEst.pages)} s.</span>
+                                    </span>
+                                  </button>
+                                  <div className="flex items-center gap-1.5 ml-5 flex-wrap">
+                                    <ChapterStatusDropdown
+                                      status={ch.status || 'ikke-paabegyndt'}
+                                      onChange={(s) => setChapterStatus(section.id, ch.id, s)}
+                                      size="sm"
+                                    />
+                                    {(ch.keywords || []).slice(0, 4).map((kw, i) => (
+                                      <span key={i} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-500 text-[10px] rounded-full">
+                                        {kw}
+                                      </span>
+                                    ))}
+                                    {(ch.keywords || []).length > 4 && (
+                                      <span className="text-[10px] text-stone-400">+{ch.keywords.length - 4}</span>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             )
                           })}
