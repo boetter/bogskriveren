@@ -29,13 +29,13 @@ import {
 import { useBookStore } from '../store'
 import { estimateChapter, formatPages } from '../utils/pageEstimation'
 import { calculateChapterLix } from '../utils/lix'
-import ProgressBar from './ProgressBar'
-import GoalEditor from './GoalEditor'
 import LixDisplay from './LixDisplay'
 import LixGoalEditor from './LixGoalEditor'
 import VersionHistory from './VersionHistory'
 import ExportButton from './ExportButton'
 import ImageGenerator from './ImageGenerator'
+import ChapterStatusDropdown from './ChapterStatusDropdown'
+import QuickAIField from './QuickAIField'
 import type { Chapter, Section } from '../types'
 
 function ToolbarButton({
@@ -74,7 +74,7 @@ interface Props {
 }
 
 export default function ChapterEditor({ section, chapter }: Props) {
-  const { updateChapterContent, updateChapterTitle, setChapterGoal, setChapterLixGoal, setActiveView } =
+  const { updateChapterContent, updateChapterTitle, setChapterLixGoal, setChapterStatus, setActiveView, aiProcessing, aiError, aiDebugInfo } =
     useBookStore()
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
 
@@ -139,23 +139,25 @@ export default function ChapterEditor({ section, chapter }: Props) {
           className="text-2xl font-bold text-stone-900 bg-transparent border-none outline-none w-full placeholder-stone-300"
           placeholder="Kapiteloverskrift"
         />
-        <div className="flex items-center gap-4 mt-3 text-sm text-stone-500 flex-wrap">
-          <span className="flex items-center gap-1.5">
-            <FileText size={14} />
-            {estimate.words} ord
-          </span>
-          <span>{estimate.characters} tegn</span>
-          <span className="font-medium text-indigo-600">
-            ~{formatPages(estimate.pages)} {estimate.pages === 1 ? 'side' : 'sider'}
-          </span>
-          <LixDisplay lix={lix} goal={chapter.goalLix} size="md" />
+        <div className="flex items-center justify-between mt-3 gap-4 flex-wrap">
+          <div className="flex items-center gap-4 text-sm text-stone-500 flex-wrap">
+            <ChapterStatusDropdown
+              status={chapter.status}
+              onChange={(s) => setChapterStatus(section.id, chapter.id, s)}
+              size="md"
+            />
+            <span className="flex items-center gap-1.5">
+              <FileText size={14} />
+              {estimate.words} ord
+            </span>
+            <span>{estimate.characters} tegn</span>
+            <span className="font-medium text-indigo-600">
+              ~{formatPages(estimate.pages)} {estimate.pages === 1 ? 'side' : 'sider'}
+            </span>
+            <LixDisplay lix={lix} goal={chapter.goalLix} size="md" />
+          </div>
         </div>
         <div className="flex items-center gap-4 mt-2 flex-wrap">
-          <GoalEditor
-            currentGoal={chapter.goalPages}
-            onSave={(goal) => setChapterGoal(section.id, chapter.id, goal)}
-            label="Sidemål"
-          />
           <LixGoalEditor
             currentGoal={chapter.goalLix}
             onSave={(lix) => setChapterLixGoal(section.id, chapter.id, lix)}
@@ -165,9 +167,40 @@ export default function ChapterEditor({ section, chapter }: Props) {
           <ExportButton type="chapter" chapter={chapter} />
           <ImageGenerator sectionId={section.id} chapter={chapter} />
         </div>
-        {chapter.goalPages && (
-          <div className="mt-3 max-w-md">
-            <ProgressBar current={estimate.pages} goal={chapter.goalPages} size="sm" />
+        {chapter.keywords.length > 0 && (
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+            {chapter.keywords.map((kw, i) => (
+              <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-xs rounded-full border border-indigo-100">
+                {kw}
+              </span>
+            ))}
+          </div>
+        )}
+        {chapter.score !== null && (
+          <div className="mt-2 inline-flex items-center gap-2 text-xs">
+            <span className="text-stone-400">Score:</span>
+            <span className={`font-bold ${chapter.score >= 70 ? 'text-emerald-600' : chapter.score >= 40 ? 'text-amber-600' : 'text-red-500'}`}>
+              {chapter.score}/100
+            </span>
+            {chapter.scoreQuestion && (
+              <span className="text-stone-400 truncate max-w-xs" title={chapter.scoreQuestion}>
+                ({chapter.scoreQuestion})
+              </span>
+            )}
+          </div>
+        )}
+        <div className="mt-3">
+          <QuickAIField sectionId={section.id} chapterId={chapter.id} />
+        </div>
+        {aiError && (
+          <div className="mt-2 text-xs text-red-600 bg-red-50 rounded-md px-3 py-2">
+            {aiError}
+            {aiDebugInfo && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-red-400">Debug info</summary>
+                <pre className="mt-1 text-[10px] text-red-400 overflow-x-auto">{JSON.stringify(aiDebugInfo, null, 2)}</pre>
+              </details>
+            )}
           </div>
         )}
       </div>

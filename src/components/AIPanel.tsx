@@ -23,9 +23,14 @@ export default function AIPanel() {
     aiProcessing,
     aiProgress,
     aiError,
+    aiDebugInfo,
     aiPanelMode,
     processWithAi,
     analyzeWithAi,
+    analyzeKeywords,
+    analyzeScores,
+    keywordsProcessing,
+    scoreProcessing,
     clearAiSelection,
     toggleAiSelectionMode,
     getSelectedChapterCount,
@@ -36,6 +41,7 @@ export default function AIPanel() {
   const [model, setModel] = useState<AIModelId>('claude-sonnet-4-6')
   const [showPresets, setShowPresets] = useState(false)
   const [mode, setMode] = useState<'process' | 'analyze'>(aiPanelMode)
+  const [scoreQuestion, setScoreQuestion] = useState('')
 
   useEffect(() => {
     setMode(aiPanelMode)
@@ -277,11 +283,59 @@ export default function AIPanel() {
 
         {/* Error */}
         {aiError && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
-            <AlertCircle size={16} className="text-red-500 mt-0.5 shrink-0" />
-            <p className="text-sm text-red-700">{aiError}</p>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <div className="flex items-start gap-2">
+              <AlertCircle size={16} className="text-red-500 mt-0.5 shrink-0" />
+              <p className="text-sm text-red-700">{aiError}</p>
+            </div>
+            {aiDebugInfo && (
+              <details className="mt-2">
+                <summary className="text-xs text-red-400 cursor-pointer">Debug info</summary>
+                <pre className="mt-1 text-[10px] text-red-400 overflow-x-auto whitespace-pre-wrap">{JSON.stringify(aiDebugInfo, null, 2)}</pre>
+              </details>
+            )}
           </div>
         )}
+
+        {/* Keywords & Score tools */}
+        <div className="border-t border-stone-200 pt-4 space-y-3">
+          <h3 className="text-sm font-medium text-stone-700">AI-værktøjer (Haiku)</h3>
+
+          <button
+            onClick={() => analyzeKeywords()}
+            disabled={aiProcessing || keywordsProcessing || selectedCount === 0}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-purple-50 border border-purple-200 text-purple-700 rounded-lg text-sm font-medium hover:bg-purple-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {keywordsProcessing ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Sparkles size={14} />
+            )}
+            Find nøgleord ({selectedCount} {selectedCount === 1 ? 'kapitel' : 'kapitler'})
+          </button>
+
+          <div className="space-y-1.5">
+            <input
+              value={scoreQuestion}
+              onChange={(e) => setScoreQuestion(e.target.value)}
+              placeholder="Spørgsmål til scoring (f.eks. 'Hvor god er kvaliteten?')"
+              className="w-full px-3 py-2 border border-stone-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-purple-500"
+              disabled={aiProcessing || scoreProcessing}
+            />
+            <button
+              onClick={() => scoreQuestion.trim() && analyzeScores(scoreQuestion.trim())}
+              disabled={aiProcessing || scoreProcessing || selectedCount === 0 || !scoreQuestion.trim()}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {scoreProcessing ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Sparkles size={14} />
+              )}
+              Scor kapitler ({selectedCount} {selectedCount === 1 ? 'kapitel' : 'kapitler'})
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Footer */}

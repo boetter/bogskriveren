@@ -13,6 +13,10 @@ export default function LixDisplay({ lix, goal, size = 'sm', showLabel = true }:
   if (lix.words === 0) return null
 
   const color = lixColor(lix.score, goal)
+  const diff = goal ? Math.abs(lix.score - goal) : null
+  const isOnTarget = diff !== null && diff <= 3
+  const isClose = diff !== null && diff <= 8
+  const goalPercent = goal ? Math.max(0, Math.min(100, 100 - (diff! / goal) * 100)) : 0
 
   if (size === 'sm') {
     return (
@@ -21,8 +25,16 @@ export default function LixDisplay({ lix, goal, size = 'sm', showLabel = true }:
         <span className="font-medium">LIX {lix.score}</span>
         {showLabel && <span className="text-stone-400">({lix.label})</span>}
         {goal && (
-          <span className={`ml-1 ${Math.abs(lix.score - goal) <= 3 ? 'text-emerald-500' : 'text-amber-500'}`}>
-            Mål: {goal}
+          <span className="inline-flex items-center gap-1 ml-1">
+            <span className={`inline-block w-8 h-1.5 rounded-full bg-stone-200 overflow-hidden`}>
+              <span
+                className={`block h-full rounded-full ${isOnTarget ? 'bg-emerald-500' : isClose ? 'bg-amber-400' : 'bg-red-400'}`}
+                style={{ width: `${goalPercent}%` }}
+              />
+            </span>
+            <span className={isOnTarget ? 'text-emerald-500' : isClose ? 'text-amber-500' : 'text-red-400'}>
+              {lix.score > goal ? `+${diff}` : diff === 0 ? '✓' : `-${diff}`}
+            </span>
           </span>
         )}
       </span>
@@ -39,13 +51,21 @@ export default function LixDisplay({ lix, goal, size = 'sm', showLabel = true }:
         <span className="text-xs text-stone-400">({lix.label})</span>
       )}
       {goal && (
-        <span
-          className={`text-xs font-medium ${
-            Math.abs(lix.score - goal) <= 3 ? 'text-emerald-600' : 'text-amber-600'
-          }`}
-        >
-          Mål: {goal}
-        </span>
+        <div className="flex items-center gap-2">
+          <div className="w-16 h-2 rounded-full bg-stone-200 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${isOnTarget ? 'bg-emerald-500' : isClose ? 'bg-amber-400' : 'bg-red-400'}`}
+              style={{ width: `${goalPercent}%` }}
+            />
+          </div>
+          <span
+            className={`text-xs font-medium ${
+              isOnTarget ? 'text-emerald-600' : isClose ? 'text-amber-600' : 'text-red-500'
+            }`}
+          >
+            Mål: {goal} ({lix.score > goal ? `+${diff}` : diff === 0 ? '✓' : `-${diff}`})
+          </span>
+        </div>
       )}
     </div>
   )

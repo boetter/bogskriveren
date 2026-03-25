@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Book, Section, Chapter, ApiUsage, AIModelId, AIAnalysis, ChapterImage } from './types'
+import type { Book, Section, Chapter, ApiUsage, AIModelId, AIAnalysis, ChapterImage, ChapterStatusId } from './types'
 
 function generateId(): string {
   return crypto.randomUUID()
@@ -17,6 +17,10 @@ function ensureChapterFields(chapter: any): Chapter {
     versions: chapter.versions || [],
     images: chapter.images || [],
     goalLix: chapter.goalLix ?? null,
+    status: chapter.status || 'ikke-paabegyndt',
+    keywords: chapter.keywords || [],
+    score: chapter.score ?? null,
+    scoreQuestion: chapter.scoreQuestion ?? null,
   }
 }
 
@@ -115,15 +119,26 @@ interface BookStore {
   clearAiSelection: () => void
   getSelectedChapterCount: () => number
 
+  // Chapter status
+  setChapterStatus: (sectionId: string, chapterId: string, status: ChapterStatusId) => void
+
   // AI processing
   aiProcessing: boolean
   aiProgress: AIProgress | null
   aiError: string | null
+  aiDebugInfo: any | null
   showAiPanel: boolean
   aiPanelMode: 'process' | 'analyze'
   setShowAiPanel: (show: boolean, mode?: 'process' | 'analyze') => void
   processWithAi: (prompt: string, model: AIModelId) => Promise<void>
   analyzeWithAi: (prompt: string, model: AIModelId) => Promise<void>
+  processChapterWithAi: (sectionId: string, chapterId: string, prompt: string, model: AIModelId) => Promise<void>
+
+  // Keywords & Scores
+  keywordsProcessing: boolean
+  scoreProcessing: boolean
+  analyzeKeywords: (model?: AIModelId) => Promise<void>
+  analyzeScores: (question: string, model?: AIModelId) => Promise<void>
 
   // Analyses
   analyses: AIAnalysis[]
@@ -172,9 +187,12 @@ export const useBookStore = create<BookStore>((set, get) => {
     aiProcessing: false,
     aiProgress: null,
     aiError: null,
+    aiDebugInfo: null,
     showAiPanel: false,
     aiPanelMode: 'process',
     analyses: [],
+    keywordsProcessing: false,
+    scoreProcessing: false,
 
     // Image state
     generatingImage: false,
@@ -325,6 +343,10 @@ export const useBookStore = create<BookStore>((set, get) => {
                     order: s.chapters.length,
                     versions: [],
                     images: [],
+                    status: 'ikke-paabegyndt' as const,
+                    keywords: [],
+                    score: null,
+                    scoreQuestion: null,
                     createdAt: now(),
                     updatedAt: now(),
                   },
@@ -388,6 +410,21 @@ export const useBookStore = create<BookStore>((set, get) => {
                 ...s,
                 chapters: s.chapters.map((c) =>
                   c.id === chapterId ? { ...c, goalLix: lix, updatedAt: now() } : c
+                ),
+              }
+            : s
+        ),
+      })),
+
+    setChapterStatus: (sectionId, chapterId, status) =>
+      updateBook((book) => ({
+        ...book,
+        sections: book.sections.map((s) =>
+          s.id === sectionId
+            ? {
+                ...s,
+                chapters: s.chapters.map((c) =>
+                  c.id === chapterId ? { ...c, status, updatedAt: now() } : c
                 ),
               }
             : s
@@ -531,6 +568,7 @@ export const useBookStore = create<BookStore>((set, get) => {
       set({
         aiProcessing: true,
         aiError: null,
+        aiDebugInfo: null,
         aiProgress: { current: 0, total: selectedItems.length, currentChapterTitle: '' },
       })
 
@@ -558,10 +596,14 @@ export const useBookStore = create<BookStore>((set, get) => {
 
           if (!res.ok) {
             const err = await res.json()
+            set({ aiDebugInfo: err.debug || null })
             throw new Error(err.error || `Fejl ved behandling af "${chapter.title}"`)
           }
 
           const result = await res.json()
+          if (result.debug) {
+            set({ aiDebugInfo: result.debug })
+          }
 
           updateBook((book) => ({
             ...book,
@@ -656,6 +698,224 @@ export const useBookStore = create<BookStore>((set, get) => {
         set({ aiError: error.message || 'AI-analyse fejlede' })
       } finally {
         set({ aiProcessing: false })
+      }
+    },
+
+    // Quick AI for single chapter (from chapter header)
+    processChapterWithAi: async (sectionId, chapterId, prompt, model) => {
+      const { book } = get()
+      const section = book.sections.find((s) => s.id === sectionId)
+      const chapter = section?.chapters.find((c) => c.id === chapterId)
+      if (!chapter || !chapter.content.trim()) {
+        set({ aiError: 'Kapitlet har intet indhold.' })
+        return
+      }
+
+      set({
+        aiProcessing: true,
+        aiError: null,
+        aiDebugInfo: null,
+        aiProgress: { current: 0, total: 1, currentChapterTitle: chapter.title },
+      })
+
+      try {
+        const res = await fetch('/api/ai-process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: chapter.content,
+            prompt,
+            model,
+            chapterTitle: chapter.title,
+          }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json()
+          set({ aiDebugInfo: err.debug || null })
+          throw new Error(err.error || `Fejl ved behandling af "${chapter.title}"`)
+        }
+
+        const result = await res.json()
+        if (result.debug) set({ aiDebugInfo: result.debug })
+
+        updateBook((book) => ({
+          ...book,
+          sections: book.sections.map((s) =>
+            s.id === sectionId
+              ? {
+                  ...s,
+                  chapters: s.chapters.map((c) =>
+                    c.id === chapterId
+                      ? {
+                          ...c,
+                          versions: [
+                            ...c.versions,
+                            {
+                              id: generateId(),
+                              content: c.content,
+                              createdAt: now(),
+                              source: 'ai' as const,
+                              prompt,
+                              model,
+                            },
+                          ],
+                          content: result.content,
+                          updatedAt: now(),
+                        }
+                      : c
+                  ),
+                }
+              : s
+          ),
+        }))
+
+        set({ aiProgress: { current: 1, total: 1, currentChapterTitle: '' } })
+        get().saveToServer()
+        get().loadApiUsage()
+      } catch (error: any) {
+        set({ aiError: error.message || 'AI-behandling fejlede' })
+      } finally {
+        set({ aiProcessing: false })
+      }
+    },
+
+    // Keywords analysis
+    analyzeKeywords: async (model = 'claude-haiku-4-5') => {
+      const state = get()
+      const { aiSelectedChapters, book } = state
+
+      const chapters: { id: string; sectionId: string; title: string; content: string }[] = []
+      for (const [sectionId, chapterIds] of aiSelectedChapters) {
+        const section = book.sections.find((s) => s.id === sectionId)
+        if (!section) continue
+        for (const chapterId of chapterIds) {
+          const chapter = section.chapters.find((c) => c.id === chapterId)
+          if (chapter && chapter.content.trim()) {
+            chapters.push({ id: chapter.id, sectionId, title: chapter.title, content: chapter.content })
+          }
+        }
+      }
+
+      if (chapters.length === 0) {
+        set({ aiError: 'Ingen kapitler med indhold er valgt.' })
+        return
+      }
+
+      set({ keywordsProcessing: true, aiError: null })
+
+      try {
+        const res = await fetch('/api/ai-keywords', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chapters: chapters.map((c) => ({ id: c.id, title: c.title, content: c.content })),
+            model,
+          }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'Nøgleordsanalyse fejlede')
+        }
+
+        const result = await res.json()
+
+        // Update chapters with keywords
+        for (const r of result.results) {
+          const ch = chapters.find((c) => c.id === r.chapterId)
+          if (!ch) continue
+          updateBook((book) => ({
+            ...book,
+            sections: book.sections.map((s) =>
+              s.id === ch.sectionId
+                ? {
+                    ...s,
+                    chapters: s.chapters.map((c) =>
+                      c.id === r.chapterId ? { ...c, keywords: r.keywords, updatedAt: now() } : c
+                    ),
+                  }
+                : s
+            ),
+          }))
+        }
+
+        get().saveToServer()
+        get().loadApiUsage()
+      } catch (error: any) {
+        set({ aiError: error.message || 'Nøgleordsanalyse fejlede' })
+      } finally {
+        set({ keywordsProcessing: false })
+      }
+    },
+
+    // Score analysis
+    analyzeScores: async (question, model = 'claude-haiku-4-5') => {
+      const state = get()
+      const { aiSelectedChapters, book } = state
+
+      const chapters: { id: string; sectionId: string; title: string; content: string }[] = []
+      for (const [sectionId, chapterIds] of aiSelectedChapters) {
+        const section = book.sections.find((s) => s.id === sectionId)
+        if (!section) continue
+        for (const chapterId of chapterIds) {
+          const chapter = section.chapters.find((c) => c.id === chapterId)
+          if (chapter && chapter.content.trim()) {
+            chapters.push({ id: chapter.id, sectionId, title: chapter.title, content: chapter.content })
+          }
+        }
+      }
+
+      if (chapters.length === 0) {
+        set({ aiError: 'Ingen kapitler med indhold er valgt.' })
+        return
+      }
+
+      set({ scoreProcessing: true, aiError: null })
+
+      try {
+        const res = await fetch('/api/ai-score', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chapters: chapters.map((c) => ({ id: c.id, title: c.title, content: c.content })),
+            question,
+            model,
+          }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json()
+          throw new Error(err.error || 'Score-analyse fejlede')
+        }
+
+        const result = await res.json()
+
+        // Update chapters with scores
+        for (const r of result.results) {
+          const ch = chapters.find((c) => c.id === r.chapterId)
+          if (!ch) continue
+          updateBook((book) => ({
+            ...book,
+            sections: book.sections.map((s) =>
+              s.id === ch.sectionId
+                ? {
+                    ...s,
+                    chapters: s.chapters.map((c) =>
+                      c.id === r.chapterId ? { ...c, score: r.score, scoreQuestion: question, updatedAt: now() } : c
+                    ),
+                  }
+                : s
+            ),
+          }))
+        }
+
+        get().saveToServer()
+        get().loadApiUsage()
+      } catch (error: any) {
+        set({ aiError: error.message || 'Score-analyse fejlede' })
+      } finally {
+        set({ scoreProcessing: false })
       }
     },
 

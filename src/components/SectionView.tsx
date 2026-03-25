@@ -20,6 +20,7 @@ import GoalEditor from './GoalEditor'
 import LixDisplay from './LixDisplay'
 import LixGoalEditor from './LixGoalEditor'
 import ExportButton from './ExportButton'
+import ChapterStatusDropdown from './ChapterStatusDropdown'
 import type { Section } from '../types'
 
 interface Props {
@@ -36,6 +37,7 @@ export default function SectionView({ section }: Props) {
     setActiveView,
     setSectionGoal,
     setSectionLixGoal,
+    setChapterStatus,
     aiSelectionMode,
     aiSelectedChapters,
     toggleChapterSelection,
@@ -203,17 +205,18 @@ export default function SectionView({ section }: Props) {
                         <span className="font-medium text-stone-800">{chapter.title}</span>
                       )}
                     </div>
-                    <div className="flex items-center gap-4 mt-1.5 text-xs text-stone-400 flex-wrap">
+                    <div className="flex items-center gap-3 mt-1.5 text-xs text-stone-400 flex-wrap">
+                      <ChapterStatusDropdown
+                        status={chapter.status || 'ikke-paabegyndt'}
+                        onChange={(s) => setChapterStatus(section.id, chapter.id, s)}
+                        size="sm"
+                      />
                       <span>{est.words} ord</span>
                       <span>~{formatPages(est.pages)} sider</span>
                       <LixDisplay lix={chLix} goal={chapter.goalLix} />
-                      {chapter.goalPages && (
-                        <span
-                          className={
-                            est.pages > chapter.goalPages ? 'text-amber-500' : 'text-emerald-500'
-                          }
-                        >
-                          Mål: {chapter.goalPages} sider
+                      {chapter.score !== null && (
+                        <span className={`font-medium ${chapter.score >= 70 ? 'text-emerald-500' : chapter.score >= 40 ? 'text-amber-500' : 'text-red-400'}`}>
+                          Score: {chapter.score}
                         </span>
                       )}
                       {chapter.versions.length > 0 && (
@@ -223,14 +226,16 @@ export default function SectionView({ section }: Props) {
                         </span>
                       )}
                     </div>
-                    {chapter.goalPages && (
-                      <div className="mt-2 max-w-xs">
-                        <ProgressBar
-                          current={est.pages}
-                          goal={chapter.goalPages}
-                          showNumbers={false}
-                          size="sm"
-                        />
+                    {(chapter.keywords || []).length > 0 && (
+                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                        {chapter.keywords.slice(0, 6).map((kw, i) => (
+                          <span key={i} className="px-1.5 py-0.5 bg-indigo-50 text-indigo-500 text-[10px] rounded-full">
+                            {kw}
+                          </span>
+                        ))}
+                        {chapter.keywords.length > 6 && (
+                          <span className="text-[10px] text-stone-400">+{chapter.keywords.length - 6}</span>
+                        )}
                       </div>
                     )}
                   </button>
