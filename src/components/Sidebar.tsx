@@ -1,15 +1,44 @@
+import { useEffect } from 'react'
 import {
   BookOpen,
   FileText,
   ChevronRight,
   PanelLeftClose,
   PanelLeft,
+  Sparkles,
+  Cloud,
+  CloudOff,
+  Loader2,
+  Check,
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { estimateSection, estimateChapter, formatPages } from '../utils/pageEstimation'
+import ApiUsageDisplay from './ApiUsageDisplay'
 
 export default function Sidebar() {
-  const { book, activeView, setActiveView, sidebarOpen, toggleSidebar } = useBookStore()
+  const {
+    book,
+    activeView,
+    setActiveView,
+    sidebarOpen,
+    toggleSidebar,
+    aiSelectionMode,
+    toggleAiSelectionMode,
+    setShowAiPanel,
+    getSelectedChapterCount,
+    clearAiSelection,
+    selectAll,
+    saving,
+    serverAvailable,
+    lastSaved,
+    loadFromServer,
+  } = useBookStore()
+
+  useEffect(() => {
+    loadFromServer()
+  }, [loadFromServer])
+
+  const selectedCount = getSelectedChapterCount()
 
   if (!sidebarOpen) {
     return (
@@ -29,9 +58,9 @@ export default function Sidebar() {
       <div className="p-4 border-b border-stone-100 flex items-center justify-between">
         <button
           onClick={() => setActiveView({ type: 'overview' })}
-          className="flex items-center gap-2 font-semibold text-stone-800 hover:text-indigo-700 transition-colors"
+          className="flex items-center gap-2 font-semibold text-stone-800 hover:text-indigo-700 transition-colors min-w-0"
         >
-          <BookOpen size={20} className="text-indigo-600" />
+          <BookOpen size={20} className="text-indigo-600 shrink-0" />
           <span className="truncate">{book.title}</span>
         </button>
         <button
@@ -41,6 +70,54 @@ export default function Sidebar() {
         >
           <PanelLeftClose size={18} />
         </button>
+      </div>
+
+      {/* AI Controls */}
+      <div className="px-3 py-3 border-b border-stone-100 space-y-2">
+        <button
+          onClick={() => {
+            if (aiSelectionMode) {
+              clearAiSelection()
+            }
+            toggleAiSelectionMode()
+          }}
+          className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+            aiSelectionMode
+              ? 'bg-purple-100 text-purple-700 border border-purple-200'
+              : 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-700 hover:from-indigo-100 hover:to-purple-100 border border-indigo-200'
+          }`}
+        >
+          <Sparkles size={16} />
+          {aiSelectionMode ? 'Afslut AI-tilstand' : 'AI-behandling'}
+        </button>
+
+        {aiSelectionMode && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={selectAll}
+                className="flex-1 px-2 py-1.5 text-xs bg-stone-100 rounded-lg text-stone-600 hover:bg-stone-200 transition-colors"
+              >
+                Vælg alle
+              </button>
+              <button
+                onClick={clearAiSelection}
+                className="flex-1 px-2 py-1.5 text-xs bg-stone-100 rounded-lg text-stone-600 hover:bg-stone-200 transition-colors"
+              >
+                Ryd valg
+              </button>
+            </div>
+            {selectedCount > 0 && (
+              <button
+                onClick={() => setShowAiPanel(true)}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+              >
+                <Sparkles size={14} />
+                Behandl {selectedCount} {selectedCount === 1 ? 'kapitel' : 'kapitler'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sections & Chapters */}
@@ -71,7 +148,6 @@ export default function Sidebar() {
                 </span>
               </button>
 
-              {/* Show chapters when section is active */}
               {isSectionActive && section.chapters.length > 0 && (
                 <div className="ml-5 mt-0.5 space-y-0.5">
                   {section.chapters.map((chapter) => {
@@ -115,6 +191,33 @@ export default function Sidebar() {
           </div>
         )}
       </nav>
+
+      {/* Footer with sync status and API usage */}
+      <div className="px-4 py-3 border-t border-stone-100 flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-xs text-stone-400">
+          {saving ? (
+            <>
+              <Loader2 size={12} className="animate-spin" />
+              <span>Gemmer...</span>
+            </>
+          ) : serverAvailable ? (
+            <>
+              <Cloud size={12} className="text-emerald-500" />
+              <span>
+                {lastSaved
+                  ? `Gemt ${new Date(lastSaved).toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })}`
+                  : 'Synkroniseret'}
+              </span>
+            </>
+          ) : (
+            <>
+              <CloudOff size={12} className="text-amber-500" />
+              <span>Lokal tilstand</span>
+            </>
+          )}
+        </div>
+        <ApiUsageDisplay />
+      </div>
     </aside>
   )
 }
