@@ -52,48 +52,38 @@ export default async (req: Request, _context: Context) => {
 
     console.log(`[ai-process] START: "${chapterTitle}" | model=${model}`);
     console.log(`[ai-process] Content: HTML=${debug.htmlLength} chars → Plain=${debug.plainTextLength} chars (${debug.reductionPercent}% reduction, ~${debug.estimatedTokens} tokens)`);
-    console.log(`[ai-process] Prompt length: ${prompt.length} chars`);
 
     const client = new Anthropic({ apiKey });
 
     const apiStartTime = Date.now();
 
-    // Use AbortController for timeout (25s to stay within Netlify's 26s limit)
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
-
-    let response: Anthropic.Message;
-    try {
-      response = await client.messages.create(
+    // Use streaming to avoid Netlify function timeout (streaming responses get up to 5 min)
+    const stream = await client.messages.stream({
+      model,
+      max_tokens: 16000,
+      system:
+        "Du er en professionel bogredigerer og sprogekspert. Du hjælper med at redigere bogkapitler på dansk. " +
+        "Returnér kun den redigerede tekst i HTML-format (brug <p>, <h2>, <h3>, <strong>, <em>, <ul>, <ol>, <li>, <blockquote> tags efter behov). " +
+        "Tilføj ingen forklaringer, kommentarer eller indledning — kun den redigerede tekst.",
+      messages: [
         {
-          model,
-          max_tokens: 16000,
-          system:
-            "Du er en professionel bogredigerer og sprogekspert. Du hjælper med at redigere bogkapitler på dansk. " +
-            "Returnér kun den redigerede tekst i HTML-format (brug <p>, <h2>, <h3>, <strong>, <em>, <ul>, <ol>, <li>, <blockquote> tags efter behov). " +
-            "Tilføj ingen forklaringer, kommentarer eller indledning — kun den redigerede tekst.",
-          messages: [
-            {
-              role: "user",
-              content: `Her er kapitlet:\n\n${plainText}\n\n---\n\nInstruktion: ${prompt}`,
-            },
-          ],
+          role: "user",
+          content: `Her er kapitlet:\n\n${plainText}\n\n---\n\nInstruktion: ${prompt}`,
         },
-        { signal: controller.signal }
-      );
-    } finally {
-      clearTimeout(timeout);
-    }
+      ],
+    });
 
+    // Collect all text from the stream
+    const finalMessage = await stream.finalMessage();
     const apiDuration = Date.now() - apiStartTime;
 
-    const resultContent = response.content
+    const resultContent = finalMessage.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")
       .map((block) => block.text)
       .join("");
 
-    const inputTokens = response.usage.input_tokens;
-    const outputTokens = response.usage.output_tokens;
+    const inputTokens = finalMessage.usage.input_tokens;
+    const outputTokens = finalMessage.usage.output_tokens;
 
     console.log(`[ai-process] API response in ${apiDuration}ms | input=${inputTokens} tokens, output=${outputTokens} tokens`);
     console.log(`[ai-process] Result length: ${resultContent.length} chars`);
@@ -151,15 +141,6 @@ export default async (req: Request, _context: Context) => {
     const totalDuration = Date.now() - startTime;
     console.error(`[ai-process] FAILED after ${totalDuration}ms:`, error?.message || error);
 
-    if (error?.name === "AbortError" || error?.message?.includes("abort")) {
-      return Response.json(
-        {
-          error: "API-kaldet tog for lang tid (timeout efter 25s). Prøv med et kortere kapitel eller en hurtigere model.",
-          debug: { totalDurationMs: totalDuration, errorType: "timeout" },
-        },
-        { status: 504 }
-      );
-    }
     if (error?.status === 401) {
       return Response.json(
         { error: "Ugyldig API-nøgle. Tjek din ANTHROPIC_API_KEY.", debug: { errorType: "auth" } },
