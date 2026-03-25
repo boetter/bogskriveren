@@ -22,64 +22,87 @@ interface ApiUsage {
   }>;
 }
 
+function jsonResponse(data: any, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export default async (req: Request, _context: Context) => {
   if (req.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
+    return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return Response.json(
+  const rawApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!rawApiKey) {
+    return jsonResponse(
       { error: "ANTHROPIC_API_KEY er ikke konfigureret. Tilføj den i Netlify Environment Variables." },
-      { status: 500 }
+      500
     );
   }
+  // Strip invisible characters (newlines, spaces, tabs, BOM) that break fetch headers
+  const apiKey = rawApiKey.replace(/[^\x20-\x7E]/g, "").trim();
 
   try {
     const { content, prompt, model, chapterTitle }: RequestBody = await req.json();
 
     if (!content || !prompt || !model) {
-      return Response.json({ error: "Manglende felter: content, prompt, model" }, { status: 400 });
+      return jsonResponse({ error: "Manglende felter: content, prompt, model" }, 400);
     }
 
     // Use streaming to avoid Netlify Function timeout
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 16000,
-        stream: true,
-        system:
-          "Du er en professionel bogredigerer og sprogekspert. Du hjælper med at redigere bogkapitler på dansk. " +
-          "Returnér kun den redigerede tekst i HTML-format (brug <p>, <h2>, <h3>, <strong>, <em>, <ul>, <ol>, <li>, <blockquote> tags efter behov). " +
-          "Tilføj ingen forklaringer, kommentarer eller indledning — kun den redigerede tekst.",
-        messages: [
-          {
-            role: "user",
-            content: `Her er kapitlet:\n\n${content}\n\n---\n\nInstruktion: ${prompt}`,
-          },
-        ],
-      }),
+    const requestBody = JSON.stringify({
+      model,
+      max_tokens: 16000,
+      stream: true,
+      system:
+        "Du er en professionel bogredigerer og sprogekspert. Du hjælper med at redigere bogkapitler på dansk. " +
+        "Returnér kun den redigerede tekst i HTML-format (brug <p>, <h2>, <h3>, <strong>, <em>, <ul>, <ol>, <li>, <blockquote> tags efter behov). " +
+        "Tilføj ingen forklaringer, kommentarer eller indledning — kun den redigerede tekst.",
+      messages: [
+        {
+          role: "user",
+          content: `Her er kapitlet:\n\n${content}\n\n---\n\nInstruktion: ${prompt}`,
+        },
+      ],
     });
 
+    let response: globalThis.Response;
+    try {
+      response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: requestBody,
+      });
+    } catch (fetchError: any) {
+      console.error("Fetch to Anthropic failed:", fetchError, "API key length:", apiKey.length, "API key chars:", JSON.stringify(apiKey.slice(0, 10)));
+      return jsonResponse({ error: `Forbindelsesfejl til Anthropic: ${fetchError?.message}` }, 502);
+    }
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const errorMsg = (errorData as any)?.error?.message || `API fejl (${response.status})`;
-      console.error("Anthropic API error:", JSON.stringify(errorData));
+      const errorText = await response.text().catch(() => "");
+      let errorMsg = `API fejl (${response.status})`;
+      try {
+        const errorData = JSON.parse(errorText);
+        errorMsg = errorData?.error?.message || errorMsg;
+      } catch {
+        errorMsg = errorText.substring(0, 200) || errorMsg;
+      }
+      console.error("Anthropic API error:", response.status, errorText.substring(0, 500));
 
       if (response.status === 401) {
-        return Response.json({ error: "Ugyldig API-nøgle. Tjek din ANTHROPIC_API_KEY." }, { status: 401 });
+        return jsonResponse({ error: "Ugyldig API-nøgle. Tjek din ANTHROPIC_API_KEY." }, 401);
       }
       if (response.status === 429) {
-        return Response.json({ error: "Rate limit nået. Vent lidt og prøv igen." }, { status: 429 });
+        return jsonResponse({ error: "Rate limit nået. Vent lidt og prøv igen." }, 429);
       }
 
-      return Response.json({ error: errorMsg }, { status: response.status });
+      return jsonResponse({ error: errorMsg }, response.status);
     }
 
     // Read the SSE stream and collect the full response
@@ -150,15 +173,15 @@ export default async (req: Request, _context: Context) => {
       console.error("Failed to track API usage:", e);
     }
 
-    return Response.json({
+    return jsonResponse({
       content: resultContent,
       usage: { inputTokens, outputTokens },
     });
   } catch (error: any) {
     console.error("AI processing failed:", error);
-    return Response.json(
+    return jsonResponse(
       { error: error?.message || "AI-behandling fejlede" },
-      { status: 500 }
+      500
     );
   }
 };
