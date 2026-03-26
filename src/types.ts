@@ -91,6 +91,18 @@ export interface AIAnalysis {
   chapterTitles: string[]
 }
 
+export interface PendingBatch {
+  batchId: string
+  type: 'process' | 'analyze'
+  prompt: string
+  model: string
+  submittedAt: string
+  /** For process batches: chapters that were submitted */
+  chapters?: { id: string; sectionId: string; title: string }[]
+  /** For analyze batches: chapter titles */
+  chapterTitles?: string[]
+}
+
 export interface PresetPrompt {
   id: string
   label: string
