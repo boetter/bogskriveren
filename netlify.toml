@@ -18,6 +18,12 @@
 [functions."ai-score"]
   external_node_modules = ["@anthropic-ai/sdk"]
 
+[functions."ai-batch-submit"]
+  external_node_modules = ["@anthropic-ai/sdk"]
+
+[functions."ai-batch-status"]
+  external_node_modules = ["@anthropic-ai/sdk"]
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
