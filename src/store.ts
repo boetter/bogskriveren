@@ -666,8 +666,8 @@ export const useBookStore = create<BookStore>((set, get) => {
         let failCount = 0
 
         for (const r of batchResult.results || []) {
-          // customId format: "process:sectionId:chapterId"
-          const parts = r.customId.split(':')
+          // customId format: "process--sectionId--chapterId"
+          const parts = r.customId.split('--')
           const rSectionId = parts[1]
           const rChapterId = parts[2]
           const item = selectedItems.find((si) => si.chapter.id === rChapterId && si.section.id === rSectionId)
@@ -832,7 +832,7 @@ export const useBookStore = create<BookStore>((set, get) => {
         }
 
         // Find the analysis result
-        const analyzeResult = batchResult.results?.find((r: any) => r.customId === 'analyze:all')
+        const analyzeResult = batchResult.results?.find((r: any) => r.customId === 'analyze--all')
         if (analyzeResult?.status === 'succeeded' && analyzeResult.content) {
           const analysis = {
             id: crypto.randomUUID(),
@@ -934,7 +934,7 @@ export const useBookStore = create<BookStore>((set, get) => {
         }
 
         const result = batchResult.results?.find((r: any) =>
-          r.customId === `process:${sectionId}:${chapterId}`
+          r.customId.startsWith(`process--${sectionId}--${chapterId}`)
         )
 
         if (!result || result.status !== 'succeeded' || !result.content?.trim()) {

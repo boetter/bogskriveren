@@ -122,7 +122,7 @@ export default async (req: Request, _context: Context) => {
 
     // For analyze batches, store the analysis
     if (type === "analyze") {
-      const analyzeResult = results.find((r) => r.customId === "analyze:all");
+      const analyzeResult = results.find((r) => r.customId === "analyze--all");
       if (analyzeResult?.content) {
         const analysis: AnalysisEntry = {
           id: crypto.randomUUID(),
