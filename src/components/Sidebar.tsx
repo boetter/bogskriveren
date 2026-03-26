@@ -8,6 +8,8 @@ import {
   Sparkles,
   Cloud,
   CloudOff,
+  RefreshCw,
+  Clock,
   Loader2,
   Search,
   PenTool,
@@ -35,6 +37,9 @@ export default function Sidebar() {
     loadFromServer,
     loadAnalyses,
     analyses,
+    pendingBatches,
+    batchChecking,
+    checkBatches,
   } = useBookStore()
 
   useEffect(() => {
@@ -201,6 +206,29 @@ export default function Sidebar() {
             Ingen sektioner endnu.
             <br />
             Opret din første sektion.
+          </div>
+        )}
+
+        {/* Pending batches */}
+        {pendingBatches.length > 0 && (
+          <div className="pt-3 mt-3 border-t border-stone-100">
+            <button
+              onClick={checkBatches}
+              disabled={batchChecking}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-left bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+            >
+              {batchChecking ? (
+                <Loader2 size={14} className="shrink-0 animate-spin" />
+              ) : (
+                <Clock size={14} className="shrink-0" />
+              )}
+              <span className="flex-1">
+                {batchChecking ? 'Tjekker...' : `Tjek batches`}
+              </span>
+              <span className="text-xs bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded-full">
+                {pendingBatches.length}
+              </span>
+            </button>
           </div>
         )}
 

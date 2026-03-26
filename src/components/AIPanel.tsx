@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react'
 import {
   Sparkles,
   X,
-  Play,
   Loader2,
   AlertCircle,
-  CheckCircle2,
   ChevronDown,
   Search,
   PenTool,
+  RefreshCw,
+  Clock,
+  Trash2,
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { PRESET_PROMPTS, ANALYSIS_PROMPTS, AI_MODELS } from '../types'
@@ -21,7 +22,6 @@ export default function AIPanel() {
     aiSelectedChapters,
     book,
     aiProcessing,
-    aiProgress,
     aiError,
     aiDebugInfo,
     aiLog,
@@ -35,6 +35,10 @@ export default function AIPanel() {
     clearAiSelection,
     toggleAiSelectionMode,
     getSelectedChapterCount,
+    pendingBatches,
+    batchChecking,
+    checkBatches,
+    removeBatch,
   } = useBookStore()
 
   const [prompt, setPrompt] = useState('')
@@ -90,8 +94,6 @@ export default function AIPanel() {
     }
   }
 
-  const isComplete = aiProgress && aiProgress.current === aiProgress.total && !aiProcessing
-
   return (
     <div className="fixed inset-y-0 right-0 w-[420px] bg-white border-l border-stone-200 shadow-2xl z-50 flex flex-col">
       {/* Header */}
@@ -108,6 +110,58 @@ export default function AIPanel() {
           <X size={20} />
         </button>
       </div>
+
+      {/* Pending batches banner */}
+      {pendingBatches.length > 0 && (
+        <div className="px-6 py-3 bg-amber-50 border-b border-amber-200">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-amber-800">
+              <Clock size={14} />
+              {pendingBatches.length} batch{pendingBatches.length > 1 ? 'es' : ''} afventer
+            </div>
+            <button
+              onClick={checkBatches}
+              disabled={batchChecking}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
+            >
+              {batchChecking ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <RefreshCw size={12} />
+              )}
+              Tjek batches
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {pendingBatches.map((batch) => {
+              const age = Math.round((Date.now() - new Date(batch.submittedAt).getTime()) / 60000)
+              const titles = batch.type === 'process'
+                ? batch.chapters?.map((c) => c.title).join(', ')
+                : batch.chapterTitles?.join(', ')
+              return (
+                <div key={batch.batchId} className="flex items-start justify-between gap-2 text-xs">
+                  <div className="min-w-0">
+                    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium mr-1.5 ${
+                      batch.type === 'process' ? 'bg-indigo-100 text-indigo-700' : 'bg-purple-100 text-purple-700'
+                    }`}>
+                      {batch.type === 'process' ? 'Rediger' : 'Analyse'}
+                    </span>
+                    <span className="text-amber-700 truncate">{titles}</span>
+                    <span className="text-amber-500 ml-1">({age}m siden)</span>
+                  </div>
+                  <button
+                    onClick={() => removeBatch(batch.batchId)}
+                    className="p-0.5 text-amber-400 hover:text-red-500 shrink-0"
+                    title="Fjern fra liste"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Mode toggle */}
       <div className="px-6 pt-4 pb-2">
@@ -149,8 +203,8 @@ export default function AIPanel() {
         {/* Mode description */}
         <div className="bg-stone-50 rounded-lg p-3 text-xs text-stone-500">
           {mode === 'process'
-            ? 'Redigering ændrer hvert kapitel individuelt. Den originale tekst gemmes som en version.'
-            : 'Analyse sender alle valgte kapitler sammen til AI og gemmer resultatet som en rapport — ingen kapitler ændres.'}
+            ? 'Redigering ændrer hvert kapitel individuelt. Den originale tekst gemmes som en version. Opgaven sendes som batch og kan tage 1-5 minutter.'
+            : 'Analyse sender alle valgte kapitler sammen til AI og gemmer resultatet som en rapport. Opgaven sendes som batch og kan tage 1-5 minutter.'}
         </div>
 
         {/* Selected chapters */}
@@ -248,40 +302,6 @@ export default function AIPanel() {
           </div>
         </div>
 
-        {/* Progress */}
-        {aiProgress && (
-          <div className="bg-indigo-50 rounded-lg p-4">
-            <div className="flex items-center gap-2 mb-2">
-              {aiProcessing ? (
-                <Loader2 size={16} className="text-indigo-600 animate-spin" />
-              ) : isComplete ? (
-                <CheckCircle2 size={16} className="text-emerald-600" />
-              ) : null}
-              <span className="text-sm font-medium text-stone-700">
-                {aiProcessing
-                  ? mode === 'analyze'
-                    ? 'Analyserer...'
-                    : `Behandler: ${aiProgress.currentChapterTitle}`
-                  : isComplete
-                    ? mode === 'analyze'
-                      ? 'Analyse færdig! Se resultatet under "Analyser".'
-                      : 'Færdig!'
-                    : ''}
-              </span>
-            </div>
-            <div className="w-full bg-indigo-200 rounded-full h-2">
-              <div
-                className="bg-indigo-600 h-2 rounded-full transition-all duration-500"
-                style={{ width: `${(aiProgress.current / aiProgress.total) * 100}%` }}
-              />
-            </div>
-            <p className="text-xs text-stone-500 mt-1.5">
-              {aiProgress.current} af {aiProgress.total}{' '}
-              {mode === 'analyze' ? '' : 'kapitler'}
-            </p>
-          </div>
-        )}
-
         {/* Error */}
         {aiError && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -376,14 +396,14 @@ export default function AIPanel() {
           {aiProcessing ? (
             <>
               <Loader2 size={18} className="animate-spin" />
-              {mode === 'analyze' ? 'Analyserer...' : 'Behandler...'}
+              Sender...
             </>
           ) : (
             <>
               {mode === 'process' ? <PenTool size={18} /> : <Search size={18} />}
               {mode === 'process'
-                ? `Kør AI-redigering (${selectedCount} ${selectedCount === 1 ? 'kapitel' : 'kapitler'})`
-                : `Kør AI-analyse (${selectedCount} ${selectedCount === 1 ? 'kapitel' : 'kapitler'})`}
+                ? `Send til redigering (${selectedCount} ${selectedCount === 1 ? 'kapitel' : 'kapitler'})`
+                : `Send til analyse (${selectedCount} ${selectedCount === 1 ? 'kapitel' : 'kapitler'})`}
             </>
           )}
         </button>
