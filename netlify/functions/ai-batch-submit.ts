@@ -61,7 +61,7 @@ export default async (req: Request, _context: Context) => {
       for (const chapter of body.chapters) {
         const plainText = htmlToText(chapter.content);
         requests.push({
-          custom_id: `process:${chapter.sectionId}:${chapter.id}`,
+          custom_id: `process--${chapter.sectionId}--${chapter.id}`.substring(0, 64),
           params: {
             model,
             max_tokens: 16000,
@@ -88,7 +88,7 @@ export default async (req: Request, _context: Context) => {
         .join("\n\n\n");
 
       requests.push({
-        custom_id: "analyze:all",
+        custom_id: "analyze--all",
         params: {
           model,
           max_tokens: 8000,
