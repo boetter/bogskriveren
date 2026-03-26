@@ -205,24 +205,24 @@ export default function Sidebar() {
         )}
 
         {/* Analyses link */}
-        {analyses.length > 0 && (
-          <div className="pt-3 mt-3 border-t border-stone-100">
-            <button
-              onClick={() => setActiveView({ type: 'analyses' })}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
-                activeView.type === 'analyses'
-                  ? 'bg-purple-50 text-purple-700 font-medium'
-                  : 'text-stone-600 hover:bg-stone-50'
-              }`}
-            >
-              <Search size={14} className="shrink-0 text-purple-500" />
-              <span className="flex-1">AI-analyser</span>
+        <div className="pt-3 mt-3 border-t border-stone-100">
+          <button
+            onClick={() => setActiveView({ type: 'analyses' })}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
+              activeView.type === 'analyses'
+                ? 'bg-purple-50 text-purple-700 font-medium'
+                : 'text-stone-600 hover:bg-stone-50'
+            }`}
+          >
+            <Search size={14} className="shrink-0 text-purple-500" />
+            <span className="flex-1">AI-analyser</span>
+            {analyses.length > 0 && (
               <span className="text-xs text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded-full">
                 {analyses.length}
               </span>
-            </button>
-          </div>
-        )}
+            )}
+          </button>
+        </div>
       </nav>
 
       {/* Footer */}
