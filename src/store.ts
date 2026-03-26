@@ -588,153 +588,128 @@ export const useBookStore = create<BookStore>((set, get) => {
         aiProgress: { current: 0, total: selectedItems.length, currentChapterTitle: '' },
       })
 
-      addLog('info', `Starter batch-redigering af ${selectedItems.length} kapitler med model=${model}`)
+      addLog('info', `Starter redigering af ${selectedItems.length} kapitler med model=${model}`)
       addLog('info', `Prompt: "${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}"`)
 
-      try {
-        // Submit batch
-        const chapters = selectedItems.map(({ section, chapter }) => ({
-          id: chapter.id,
-          sectionId: section.id,
-          title: chapter.title,
-          content: chapter.content,
-        }))
+      let successCount = 0
+      let failCount = 0
 
-        addLog('info', 'Opretter batch hos Anthropic...')
-        const submitRes = await fetch('/api/ai-batch-submit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'process', chapters, prompt, model }),
+      for (let i = 0; i < selectedItems.length; i++) {
+        const { section, chapter } = selectedItems[i]
+        set({
+          aiProgress: {
+            current: i,
+            total: selectedItems.length,
+            currentChapterTitle: chapter.title,
+          },
         })
 
-        if (!submitRes.ok) {
-          const err = await submitRes.json()
-          throw new Error(err.error || 'Kunne ikke oprette batch')
-        }
+        addLog('info', `[${i + 1}/${selectedItems.length}] Sender "${chapter.title}" (${chapter.content.length} HTML-tegn)`)
 
-        const { batchId, requestCount } = await submitRes.json()
-        addLog('success', `Batch oprettet: ${batchId} (${requestCount} requests)`)
-        addLog('info', 'Venter på resultater fra Anthropic...')
-
-        // Poll for results
-        let attempts = 0
-        const maxAttempts = 120 // 10 minutes max (5s intervals)
-        let batchResult: any = null
-
-        while (attempts < maxAttempts) {
-          await new Promise((r) => setTimeout(r, 5000))
-          attempts++
-
-          const statusRes = await fetch('/api/ai-batch-status', {
+        try {
+          const fetchStart = Date.now()
+          const res = await fetch('/api/ai-process', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ batchId, type: 'process', prompt, model }),
+            body: JSON.stringify({
+              content: chapter.content,
+              prompt,
+              model,
+              chapterTitle: chapter.title,
+            }),
           })
 
-          if (!statusRes.ok) {
-            addLog('warn', `Polling fejlede (forsøg ${attempts}), prøver igen...`)
+          if (!res.ok) {
+            const fetchDuration = Date.now() - fetchStart
+            let errBody: any = {}
+            try { errBody = await res.json() } catch { /* ignore */ }
+            addLog('error', `[${i + 1}/${selectedItems.length}] FEJL for "${chapter.title}": HTTP ${res.status} efter ${fetchDuration}ms`, {
+              status: res.status,
+              error: errBody.error,
+              debug: errBody.debug,
+            })
+            set({ aiDebugInfo: errBody.debug || null })
+            failCount++
             continue
           }
 
-          const statusData = await statusRes.json()
+          const result = await res.json()
+          const fetchDuration = Date.now() - fetchStart
 
-          if (statusData.status === 'ended') {
-            batchResult = statusData
-            break
-          }
-
-          const counts = statusData.counts || {}
-          set({
-            aiProgress: {
-              current: counts.succeeded || 0,
-              total: selectedItems.length,
-              currentChapterTitle: `Behandler... (${counts.processing || 0} i gang)`,
-            },
+          addLog('success', `[${i + 1}/${selectedItems.length}] "${chapter.title}" OK (${fetchDuration}ms)`, {
+            inputTokens: result.usage?.inputTokens,
+            outputTokens: result.usage?.outputTokens,
+            resultLength: result.content?.length,
+            ...(result.debug || {}),
           })
 
-          if (attempts % 6 === 0) {
-            addLog('info', `Stadig i gang... (${counts.succeeded || 0} færdige, ${counts.processing || 0} i gang)`)
+          if (result.debug) {
+            set({ aiDebugInfo: result.debug })
           }
-        }
 
-        if (!batchResult) {
-          throw new Error('Batch-behandling tog for lang tid (>10 minutter)')
-        }
-
-        // Apply results
-        let successCount = 0
-        let failCount = 0
-
-        for (const r of batchResult.results || []) {
-          // customId format: "process--sectionId--chapterId"
-          const parts = r.customId.split('--')
-          const rSectionId = parts[1]
-          const rChapterId = parts[2]
-          const item = selectedItems.find((si) => si.chapter.id === rChapterId && si.section.id === rSectionId)
-
-          if (r.status === 'succeeded' && r.content && r.content.trim()) {
-            updateBook((book) => ({
-              ...book,
-              sections: book.sections.map((s) =>
-                s.id === rSectionId
-                  ? {
-                      ...s,
-                      chapters: s.chapters.map((c) =>
-                        c.id === rChapterId
-                          ? {
-                              ...c,
-                              versions: [
-                                ...c.versions,
-                                {
-                                  id: generateId(),
-                                  content: c.content,
-                                  createdAt: now(),
-                                  source: 'ai' as const,
-                                  prompt,
-                                  model,
-                                },
-                              ],
-                              content: r.content,
-                              updatedAt: now(),
-                            }
-                          : c
-                      ),
-                    }
-                  : s
-              ),
-            }))
-            addLog('success', `"${item?.chapter.title || rChapterId}" OK`, r.usage)
-            successCount++
-          } else {
-            addLog('error', `"${item?.chapter.title || rChapterId}" fejlede: ${r.error || r.status}`)
+          if (!result.content || result.content.trim().length === 0) {
+            addLog('warn', `[${i + 1}/${selectedItems.length}] "${chapter.title}" returnerede tomt indhold — springer over`)
             failCount++
+            continue
           }
+
+          updateBook((book) => ({
+            ...book,
+            sections: book.sections.map((s) =>
+              s.id === section.id
+                ? {
+                    ...s,
+                    chapters: s.chapters.map((c) =>
+                      c.id === chapter.id
+                        ? {
+                            ...c,
+                            versions: [
+                              ...c.versions,
+                              {
+                                id: generateId(),
+                                content: c.content,
+                                createdAt: now(),
+                                source: 'ai' as const,
+                                prompt,
+                                model,
+                              },
+                            ],
+                            content: result.content,
+                            updatedAt: now(),
+                          }
+                        : c
+                    ),
+                  }
+                : s
+            ),
+          }))
+          successCount++
+        } catch (error: any) {
+          addLog('error', `[${i + 1}/${selectedItems.length}] UNDTAGELSE for "${chapter.title}": ${error.message}`)
+          failCount++
+          continue
         }
-
-        const summary = `Færdig: ${successCount} ok, ${failCount} fejl af ${selectedItems.length} kapitler`
-        addLog(failCount > 0 ? 'warn' : 'success', summary)
-
-        if (failCount > 0 && successCount === 0) {
-          set({ aiError: `Alle ${failCount} kapitler fejlede. Se debug-log for detaljer.` })
-        } else if (failCount > 0) {
-          set({ aiError: `${failCount} af ${selectedItems.length} kapitler fejlede. Se debug-log.` })
-        }
-
-        set({
-          aiProgress: {
-            current: selectedItems.length,
-            total: selectedItems.length,
-            currentChapterTitle: '',
-          },
-        })
-        get().saveToServer()
-        get().loadApiUsage()
-      } catch (error: any) {
-        addLog('error', `FEJL: ${error.message}`)
-        set({ aiError: error.message || 'AI-behandling fejlede' })
-      } finally {
-        set({ aiProcessing: false })
       }
+
+      const summary = `Færdig: ${successCount} ok, ${failCount} fejl af ${selectedItems.length} kapitler`
+      addLog(failCount > 0 ? 'warn' : 'success', summary)
+
+      if (failCount > 0 && successCount === 0) {
+        set({ aiError: `Alle ${failCount} kapitler fejlede. Se debug-log for detaljer.` })
+      } else if (failCount > 0) {
+        set({ aiError: `${failCount} af ${selectedItems.length} kapitler fejlede. Se debug-log.` })
+      }
+
+      set({
+        aiProgress: {
+          current: selectedItems.length,
+          total: selectedItems.length,
+          currentChapterTitle: '',
+        },
+      })
+      get().saveToServer()
+      get().loadApiUsage()
+      set({ aiProcessing: false })
     },
 
     analyzeWithAi: async (prompt, model) => {
@@ -764,93 +739,49 @@ export const useBookStore = create<BookStore>((set, get) => {
         return
       }
 
-      set({ aiProcessing: true, aiError: null, aiLog: [], aiProgress: { current: 0, total: 1, currentChapterTitle: 'Opretter batch...' } })
+      set({ aiProcessing: true, aiError: null, aiLog: [], aiProgress: { current: 0, total: 1, currentChapterTitle: 'Analyserer...' } })
 
       const totalChars = chapters.reduce((sum, ch) => sum + ch.content.length, 0)
-      addLog('info', `Starter batch-analyse af ${chapters.length} kapitler med model=${model}`)
+      addLog('info', `Starter analyse af ${chapters.length} kapitler med model=${model}`)
       addLog('info', `Kapitler: ${chapters.map((c) => c.title).join(', ')} (${totalChars} tegn total)`)
 
       try {
-        // Submit batch
-        addLog('info', 'Opretter batch hos Anthropic...')
-        const submitRes = await fetch('/api/ai-batch-submit', {
+        const fetchStart = Date.now()
+        const res = await fetch('/api/ai-analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'analyze', chapters, prompt, model }),
+          body: JSON.stringify({ chapters, prompt, model }),
         })
 
-        if (!submitRes.ok) {
-          const err = await submitRes.json()
-          throw new Error(err.error || 'Kunne ikke oprette batch')
-        }
-
-        const { batchId } = await submitRes.json()
-        addLog('success', `Batch oprettet: ${batchId}`)
-        addLog('info', 'Venter på resultater fra Anthropic...')
-        set({ aiProgress: { current: 0, total: 1, currentChapterTitle: 'Analyserer...' } })
-
-        // Poll for results
-        let attempts = 0
-        const maxAttempts = 120
-        let batchResult: any = null
-
-        while (attempts < maxAttempts) {
-          await new Promise((r) => setTimeout(r, 5000))
-          attempts++
-
-          const statusRes = await fetch('/api/ai-batch-status', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              batchId,
-              type: 'analyze',
-              prompt,
-              model,
-              chapterTitles: chapters.map((c) => c.title),
-            }),
+        if (!res.ok) {
+          const fetchDuration = Date.now() - fetchStart
+          let errBody: any = {}
+          try { errBody = await res.json() } catch { /* ignore */ }
+          addLog('error', `FEJL: HTTP ${res.status} efter ${fetchDuration}ms`, {
+            status: res.status,
+            error: errBody.error,
+            debug: errBody.debug,
           })
-
-          if (!statusRes.ok) {
-            addLog('warn', `Polling fejlede (forsøg ${attempts}), prøver igen...`)
-            continue
-          }
-
-          const statusData = await statusRes.json()
-
-          if (statusData.status === 'ended') {
-            batchResult = statusData
-            break
-          }
-
-          if (attempts % 6 === 0) {
-            addLog('info', `Stadig i gang... (forsøg ${attempts})`)
-          }
+          throw new Error(errBody.error || 'AI-analyse fejlede')
         }
 
-        if (!batchResult) {
-          throw new Error('Batch-analyse tog for lang tid (>10 minutter)')
-        }
+        const result = await res.json()
+        const fetchDuration = Date.now() - fetchStart
 
-        // Find the analysis result
-        const analyzeResult = batchResult.results?.find((r: any) => r.customId === 'analyze--all')
-        if (analyzeResult?.status === 'succeeded' && analyzeResult.content) {
-          const analysis = {
-            id: crypto.randomUUID(),
-            timestamp: new Date().toISOString(),
-            prompt,
-            result: analyzeResult.content,
-            model,
-            chapterTitles: chapters.map((c) => c.title),
-          }
+        addLog('success', `Analyse OK (${fetchDuration}ms)`, {
+          inputTokens: result.usage?.inputTokens,
+          outputTokens: result.usage?.outputTokens,
+          resultLength: result.analysis?.result?.length,
+          ...(result.debug || {}),
+        })
+
+        if (result.analysis) {
           set((s) => ({
-            analyses: [...s.analyses, analysis],
+            analyses: [...s.analyses, result.analysis],
             aiProgress: { current: 1, total: 1, currentChapterTitle: '' },
+            activeView: { type: 'analyses' as const },
           }))
-          addLog('success', `Analyse OK`, analyzeResult.usage)
-        } else {
-          throw new Error(analyzeResult?.error || 'Analyse returnerede intet resultat')
         }
-
         get().loadApiUsage()
       } catch (error: any) {
         addLog('error', `FEJL: ${error.message}`)
@@ -860,7 +791,7 @@ export const useBookStore = create<BookStore>((set, get) => {
       }
     },
 
-    // Quick AI for single chapter (from chapter header) — also uses batch
+    // Quick AI for single chapter (from chapter header)
     processChapterWithAi: async (sectionId, chapterId, prompt, model) => {
       const { book } = get()
       const section = book.sections.find((s) => s.id === sectionId)
@@ -878,68 +809,25 @@ export const useBookStore = create<BookStore>((set, get) => {
       })
 
       try {
-        // Submit batch with single chapter
-        const submitRes = await fetch('/api/ai-batch-submit', {
+        const res = await fetch('/api/ai-process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            type: 'process',
-            chapters: [{ id: chapterId, sectionId, title: chapter.title, content: chapter.content }],
+            content: chapter.content,
             prompt,
             model,
+            chapterTitle: chapter.title,
           }),
         })
 
-        if (!submitRes.ok) {
-          const err = await submitRes.json()
-          throw new Error(err.error || 'Kunne ikke oprette batch')
+        if (!res.ok) {
+          const err = await res.json()
+          set({ aiDebugInfo: err.debug || null })
+          throw new Error(err.error || `Fejl ved behandling af "${chapter.title}"`)
         }
 
-        const { batchId } = await submitRes.json()
-
-        // Poll for results
-        let attempts = 0
-        const maxAttempts = 120
-        let batchResult: any = null
-
-        while (attempts < maxAttempts) {
-          await new Promise((r) => setTimeout(r, 5000))
-          attempts++
-
-          set({
-            aiProgress: {
-              current: 0,
-              total: 1,
-              currentChapterTitle: `${chapter.title} (venter${'.'.repeat((attempts % 3) + 1)})`,
-            },
-          })
-
-          const statusRes = await fetch('/api/ai-batch-status', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ batchId, type: 'process', prompt, model }),
-          })
-
-          if (!statusRes.ok) continue
-
-          const statusData = await statusRes.json()
-          if (statusData.status === 'ended') {
-            batchResult = statusData
-            break
-          }
-        }
-
-        if (!batchResult) {
-          throw new Error('Behandling tog for lang tid (>10 minutter)')
-        }
-
-        const result = batchResult.results?.find((r: any) =>
-          r.customId.startsWith(`process--${sectionId}--${chapterId}`)
-        )
-
-        if (!result || result.status !== 'succeeded' || !result.content?.trim()) {
-          throw new Error(result?.error || 'Ingen resultat fra batch')
-        }
+        const result = await res.json()
+        if (result.debug) set({ aiDebugInfo: result.debug })
 
         updateBook((book) => ({
           ...book,
