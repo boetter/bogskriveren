@@ -22,77 +22,70 @@ export default function QuickAIField({ sectionId, chapterId }: Props) {
   }
 
   return (
-    <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-3 border border-indigo-100">
-      <div className="flex items-center gap-2 mb-2">
-        <Sparkles size={14} className="text-indigo-500" />
-        <span className="text-xs font-medium text-indigo-700">Hurtig AI-redigering</span>
-      </div>
-
-      <div className="flex gap-2">
-        <div className="flex-1 relative">
-          <div className="flex gap-1.5">
-            <div className="relative flex-1">
-              <input
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleRun()}
-                placeholder="Skriv instruktion eller vælg preset..."
-                className="w-full px-2.5 py-1.5 text-xs border border-stone-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-transparent pr-7"
-                disabled={aiProcessing}
-              />
-              <button
-                onClick={() => setShowPresets(!showPresets)}
-                className="absolute right-1 top-1/2 -translate-y-1/2 text-stone-400 hover:text-indigo-500 transition-colors"
-              >
-                <ChevronDown size={14} />
-              </button>
-
-              {showPresets && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-stone-200 rounded-lg shadow-lg z-20 max-h-48 overflow-y-auto">
-                  {PRESET_PROMPTS.map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => {
-                        setPrompt(p.prompt)
-                        setShowPresets(false)
-                      }}
-                      className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 border-b border-stone-100 last:border-0"
-                    >
-                      <div className="font-medium text-stone-700">{p.label}</div>
-                      <div className="text-stone-400 mt-0.5">{p.description}</div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value as AIModelId)}
-              className="px-2 py-1.5 text-xs border border-stone-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+    <div className="flex items-center gap-1.5 shrink-0">
+      <div className="relative">
+        <div className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 rounded-lg px-2 py-1">
+          <Sparkles size={12} className="text-indigo-400 shrink-0" />
+          <div className="relative">
+            <input
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleRun()}
+              placeholder="AI-instruktion..."
+              className="w-44 px-1.5 py-0.5 text-xs border-none outline-none bg-transparent placeholder-indigo-300 text-stone-800"
               disabled={aiProcessing}
+            />
+            <button
+              onClick={() => setShowPresets(!showPresets)}
+              className="absolute right-0 top-1/2 -translate-y-1/2 text-indigo-300 hover:text-indigo-500 transition-colors"
+              tabIndex={-1}
             >
-              {AI_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
+              <ChevronDown size={12} />
+            </button>
           </div>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value as AIModelId)}
+            className="text-xs border-none outline-none bg-transparent text-indigo-500 cursor-pointer pr-1"
+            disabled={aiProcessing}
+          >
+            {AI_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label.replace('Claude ', '').replace(' 4.5', '').replace(' 4.6', '')}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={handleRun}
+            disabled={!prompt.trim() || aiProcessing}
+            className="px-2 py-0.5 bg-indigo-600 text-white text-xs rounded-md hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1 shrink-0"
+          >
+            {aiProcessing ? (
+              <Loader2 size={11} className="animate-spin" />
+            ) : (
+              <Sparkles size={11} />
+            )}
+            Kør
+          </button>
         </div>
 
-        <button
-          onClick={handleRun}
-          disabled={!prompt.trim() || aiProcessing}
-          className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-md hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 shrink-0"
-        >
-          {aiProcessing ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : (
-            <Sparkles size={12} />
-          )}
-          Kør
-        </button>
+        {showPresets && (
+          <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-stone-200 rounded-lg shadow-lg z-20 max-h-48 overflow-y-auto">
+            {PRESET_PROMPTS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => {
+                  setPrompt(p.prompt)
+                  setShowPresets(false)
+                }}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 border-b border-stone-100 last:border-0"
+              >
+                <div className="font-medium text-stone-700">{p.label}</div>
+                <div className="text-stone-400 mt-0.5">{p.description}</div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

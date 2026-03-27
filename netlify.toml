@@ -24,6 +24,9 @@
 [functions."ai-batch-status"]
   external_node_modules = ["@anthropic-ai/sdk"]
 
+[functions."ai-selection"]
+  external_node_modules = ["@anthropic-ai/sdk"]
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

@@ -93,14 +93,16 @@ export interface AIAnalysis {
 
 export interface PendingBatch {
   batchId: string
-  type: 'process' | 'analyze'
+  type: 'process' | 'analyze' | 'keywords' | 'scores'
   prompt: string
   model: string
   submittedAt: string
-  /** For process batches: chapters that were submitted */
+  /** For process/keywords/scores batches: chapters that were submitted */
   chapters?: { id: string; sectionId: string; title: string }[]
   /** For analyze batches: chapter titles */
   chapterTitles?: string[]
+  /** For scores batches: the scoring question */
+  question?: string
 }
 
 export interface PresetPrompt {
