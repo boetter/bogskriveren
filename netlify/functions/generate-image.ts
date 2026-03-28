@@ -1,3 +1,4 @@
+import { getStore } from "@netlify/blobs";
 import type { Context } from "@netlify/functions";
 
 interface RequestBody {
@@ -78,6 +79,23 @@ export default async (req: Request, _context: Context) => {
         { error: "Ingen billede genereret. Prøv igen med en anden prompt." },
         { status: 500 }
       );
+    }
+
+    // Track Google API usage
+    try {
+      const store = getStore("book-data");
+      const existing = (await store.get("google-usage", { type: "json" })) as any;
+      const usage = existing || { imageCount: 0, calls: [] };
+      usage.imageCount += 1;
+      usage.calls.push({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        chapterTitle: chapterTitle || "Ukendt kapitel",
+      });
+      if (usage.calls.length > 200) usage.calls = usage.calls.slice(-200);
+      await store.setJSON("google-usage", usage);
+    } catch (e) {
+      console.error("[generate-image] Failed to track usage:", e);
     }
 
     return Response.json({

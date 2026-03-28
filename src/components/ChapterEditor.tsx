@@ -4,7 +4,7 @@ import Underline from '@tiptap/extension-underline'
 import Highlight from '@tiptap/extension-highlight'
 import TextAlign from '@tiptap/extension-text-align'
 import Placeholder from '@tiptap/extension-placeholder'
-import { useEffect, useCallback, useRef } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import {
   Bold,
   Italic,
@@ -25,6 +25,9 @@ import {
   Redo,
   ArrowLeft,
   FileText,
+  Sparkles,
+  Loader2,
+  X,
 } from 'lucide-react'
 import { useBookStore } from '../store'
 import { estimateChapter, formatPages } from '../utils/pageEstimation'
@@ -37,6 +40,8 @@ import ImageGenerator from './ImageGenerator'
 import ChapterStatusDropdown from './ChapterStatusDropdown'
 import QuickAIField from './QuickAIField'
 import type { Chapter, Section } from '../types'
+import { AI_MODELS } from '../types'
+import type { AIModelId } from '../types'
 
 function ToolbarButton({
   onClick,
@@ -78,6 +83,62 @@ export default function ChapterEditor({ section, chapter }: Props) {
     useBookStore()
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
 
+  // Text selection AI editing
+  const selectionRangeRef = useRef<{ from: number; to: number } | null>(null)
+  const [hasSelection, setHasSelection] = useState(false)
+  const [selectionPanelOpen, setSelectionPanelOpen] = useState(false)
+  const [selectionRange, setSelectionRange] = useState<{ from: number; to: number } | null>(null)
+  const [selectionPrompt, setSelectionPrompt] = useState('')
+  const [selectionModel, setSelectionModel] = useState<AIModelId>('claude-sonnet-4-6')
+  const [selectionProcessing, setSelectionProcessing] = useState(false)
+  const [selectionError, setSelectionError] = useState<string | null>(null)
+
+  const handleOpenSelectionPanel = () => {
+    if (selectionRangeRef.current) {
+      setSelectionRange(selectionRangeRef.current)
+      setSelectionPanelOpen(true)
+      setSelectionError(null)
+    }
+  }
+
+  const handleCloseSelectionPanel = () => {
+    setSelectionPanelOpen(false)
+    setSelectionRange(null)
+    setSelectionPrompt('')
+    setSelectionError(null)
+  }
+
+  const handleSelectionRewrite = async () => {
+    if (!editor || !selectionRange || !selectionPrompt.trim()) return
+    const { from, to } = selectionRange
+    const selectedText = editor.state.doc.textBetween(from, to, '\n', '\n\n')
+    const fullContent = editor.getHTML()
+
+    setSelectionProcessing(true)
+    setSelectionError(null)
+
+    try {
+      const res = await fetch('/api/ai-selection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selectedText, fullContent, prompt: selectionPrompt.trim(), model: selectionModel }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Fejlede')
+      }
+
+      const { content } = await res.json()
+      editor.chain().focus().deleteRange({ from, to }).insertContentAt(from, content).run()
+      handleCloseSelectionPanel()
+    } catch (err: any) {
+      setSelectionError(err.message || 'Tekstomskrivning fejlede')
+    } finally {
+      setSelectionProcessing(false)
+    }
+  }
+
   const debouncedUpdate = useCallback(
     (html: string) => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -101,6 +162,16 @@ export default function ChapterEditor({ section, chapter }: Props) {
     content: chapter.content,
     onUpdate: ({ editor }) => {
       debouncedUpdate(editor.getHTML())
+    },
+    onSelectionUpdate: ({ editor }) => {
+      const { from, to } = editor.state.selection
+      if (from !== to) {
+        selectionRangeRef.current = { from, to }
+        setHasSelection(true)
+      } else {
+        selectionRangeRef.current = null
+        setHasSelection(false)
+      }
     },
     editorProps: {
       attributes: {
@@ -133,12 +204,15 @@ export default function ChapterEditor({ section, chapter }: Props) {
           </button>
           <div className="text-sm text-stone-400">{section.title}</div>
         </div>
-        <input
-          value={chapter.title}
-          onChange={(e) => updateChapterTitle(section.id, chapter.id, e.target.value)}
-          className="text-2xl font-bold text-stone-900 bg-transparent border-none outline-none w-full placeholder-stone-300"
-          placeholder="Kapiteloverskrift"
-        />
+        <div className="flex items-center gap-3">
+          <input
+            value={chapter.title}
+            onChange={(e) => updateChapterTitle(section.id, chapter.id, e.target.value)}
+            className="text-2xl font-bold text-stone-900 bg-transparent border-none outline-none flex-1 min-w-0 placeholder-stone-300"
+            placeholder="Kapiteloverskrift"
+          />
+          <QuickAIField sectionId={section.id} chapterId={chapter.id} />
+        </div>
         <div className="flex items-center justify-between mt-3 gap-4 flex-wrap">
           <div className="flex items-center gap-4 text-sm text-stone-500 flex-wrap">
             <ChapterStatusDropdown
@@ -189,9 +263,6 @@ export default function ChapterEditor({ section, chapter }: Props) {
             )}
           </div>
         )}
-        <div className="mt-3">
-          <QuickAIField sectionId={section.id} chapterId={chapter.id} />
-        </div>
         {aiError && (
           <div className="mt-2 text-xs text-red-600 bg-red-50 rounded-md px-3 py-2">
             {aiError}
@@ -333,6 +404,58 @@ export default function ChapterEditor({ section, chapter }: Props) {
           >
             <Redo size={iconSize} />
           </ToolbarButton>
+        </div>
+      )}
+
+      {/* Selection AI bar */}
+      {(hasSelection || selectionPanelOpen) && (
+        <div className="border-b border-amber-200 bg-amber-50 px-6 py-1.5 flex items-center gap-2 flex-wrap">
+          <Sparkles size={13} className="text-amber-600 shrink-0" />
+          {!selectionPanelOpen ? (
+            <button
+              onClick={handleOpenSelectionPanel}
+              className="text-xs text-amber-700 font-medium hover:text-amber-900 transition-colors"
+            >
+              AI: omskriv markeret tekst
+            </button>
+          ) : (
+            <>
+              <input
+                value={selectionPrompt}
+                onChange={(e) => setSelectionPrompt(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSelectionRewrite()}
+                placeholder="Hvad skal der ske med den markerede tekst?"
+                className="flex-1 min-w-48 px-2 py-0.5 text-xs border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white"
+                disabled={selectionProcessing}
+                autoFocus
+              />
+              <select
+                value={selectionModel}
+                onChange={(e) => setSelectionModel(e.target.value as AIModelId)}
+                className="px-1.5 py-0.5 text-xs border border-amber-300 rounded focus:outline-none bg-white"
+                disabled={selectionProcessing}
+              >
+                {AI_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+              <button
+                onClick={handleSelectionRewrite}
+                disabled={!selectionPrompt.trim() || selectionProcessing}
+                className="px-2.5 py-0.5 bg-amber-600 text-white text-xs rounded hover:bg-amber-700 disabled:opacity-40 transition-colors flex items-center gap-1 shrink-0"
+              >
+                {selectionProcessing ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                Kør
+              </button>
+              <button
+                onClick={handleCloseSelectionPanel}
+                className="p-0.5 text-amber-500 hover:text-amber-700 transition-colors shrink-0"
+              >
+                <X size={13} />
+              </button>
+              {selectionError && <span className="text-xs text-red-600 w-full">{selectionError}</span>}
+            </>
+          )}
         </div>
       )}
 

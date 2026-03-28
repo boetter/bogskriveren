@@ -863,6 +863,68 @@ export const useBookStore = create<BookStore>((set, get) => {
             // The analysis was already stored server-side by ai-batch-status
             await get().loadAnalyses()
             addLog('success', `Analyse-batch færdig! Se "AI-analyser" i sidebaren.`)
+          } else if (batch.type === 'keywords' && batch.chapters) {
+            const keywordUpdates: { chapterId: string; sectionId: string; keywords: string[] }[] = []
+            for (const r of data.results || []) {
+              const parts = r.customId.split('--')
+              const rSectionId = parts[1]
+              const rChapterId = parts[2]
+              if (r.status === 'succeeded' && r.content) {
+                const match = r.content.match(/\[[\s\S]*?\]/)
+                if (match) {
+                  try {
+                    const keywords = JSON.parse(match[0]).filter((k: any) => typeof k === 'string').slice(0, 10)
+                    keywordUpdates.push({ chapterId: rChapterId, sectionId: rSectionId, keywords })
+                  } catch { /* ignore */ }
+                }
+              }
+            }
+            if (keywordUpdates.length > 0) {
+              updateBook((book) => ({
+                ...book,
+                sections: book.sections.map((s) => ({
+                  ...s,
+                  chapters: s.chapters.map((c) => {
+                    const u = keywordUpdates.find((x) => x.chapterId === c.id && x.sectionId === s.id)
+                    return u ? { ...c, keywords: u.keywords, updatedAt: now() } : c
+                  }),
+                })),
+              }))
+            }
+            addLog('success', `Nøgleords-batch færdig: ${keywordUpdates.length} kapitler opdateret`)
+            get().saveToServer()
+          } else if (batch.type === 'scores' && batch.chapters) {
+            const question = batch.question || ''
+            const scoreUpdates: { chapterId: string; sectionId: string; score: number }[] = []
+            for (const r of data.results || []) {
+              const parts = r.customId.split('--')
+              const rSectionId = parts[1]
+              const rChapterId = parts[2]
+              if (r.status === 'succeeded' && r.content) {
+                const match = r.content.match(/\{[\s\S]*?\}/)
+                if (match) {
+                  try {
+                    const parsed = JSON.parse(match[0])
+                    const score = Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 0)))
+                    scoreUpdates.push({ chapterId: rChapterId, sectionId: rSectionId, score })
+                  } catch { /* ignore */ }
+                }
+              }
+            }
+            if (scoreUpdates.length > 0) {
+              updateBook((book) => ({
+                ...book,
+                sections: book.sections.map((s) => ({
+                  ...s,
+                  chapters: s.chapters.map((c) => {
+                    const u = scoreUpdates.find((x) => x.chapterId === c.id && x.sectionId === s.id)
+                    return u ? { ...c, score: u.score, scoreQuestion: question, updatedAt: now() } : c
+                  }),
+                })),
+              }))
+            }
+            addLog('success', `Score-batch færdig: ${scoreUpdates.length} kapitler scoret`)
+            get().saveToServer()
           }
 
           get().loadApiUsage()
@@ -883,10 +945,9 @@ export const useBookStore = create<BookStore>((set, get) => {
       set({ pendingBatches: updated })
     },
 
-    // Keywords analysis
+    // Keywords analysis — now uses batch API
     analyzeKeywords: async (model = 'claude-haiku-4-5') => {
-      const state = get()
-      const { aiSelectedChapters, book } = state
+      const { aiSelectedChapters, book } = get()
 
       const chapters: { id: string; sectionId: string; title: string; content: string }[] = []
       for (const [sectionId, chapterIds] of aiSelectedChapters) {
@@ -908,13 +969,10 @@ export const useBookStore = create<BookStore>((set, get) => {
       set({ keywordsProcessing: true, aiError: null })
 
       try {
-        const res = await fetch('/api/ai-keywords', {
+        const res = await fetch('/api/ai-batch-submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chapters: chapters.map((c) => ({ id: c.id, title: c.title, content: c.content })),
-            model,
-          }),
+          body: JSON.stringify({ type: 'keywords', chapters, model }),
         })
 
         if (!res.ok) {
@@ -922,29 +980,19 @@ export const useBookStore = create<BookStore>((set, get) => {
           throw new Error(err.error || 'Nøgleordsanalyse fejlede')
         }
 
-        const result = await res.json()
-
-        // Update chapters with keywords
-        for (const r of result.results) {
-          const ch = chapters.find((c) => c.id === r.chapterId)
-          if (!ch) continue
-          updateBook((book) => ({
-            ...book,
-            sections: book.sections.map((s) =>
-              s.id === ch.sectionId
-                ? {
-                    ...s,
-                    chapters: s.chapters.map((c) =>
-                      c.id === r.chapterId ? { ...c, keywords: r.keywords, updatedAt: now() } : c
-                    ),
-                  }
-                : s
-            ),
-          }))
+        const { batchId } = await res.json()
+        const batch: PendingBatch = {
+          batchId,
+          type: 'keywords',
+          prompt: 'Nøgleordsanalyse',
+          model,
+          submittedAt: new Date().toISOString(),
+          chapters: chapters.map((c) => ({ id: c.id, sectionId: c.sectionId, title: c.title })),
         }
 
-        get().saveToServer()
-        get().loadApiUsage()
+        const updated = [...get().pendingBatches, batch]
+        savePendingBatches(updated)
+        set({ pendingBatches: updated })
       } catch (error: any) {
         set({ aiError: error.message || 'Nøgleordsanalyse fejlede' })
       } finally {
@@ -952,10 +1000,9 @@ export const useBookStore = create<BookStore>((set, get) => {
       }
     },
 
-    // Score analysis
+    // Score analysis — now uses batch API
     analyzeScores: async (question, model = 'claude-haiku-4-5') => {
-      const state = get()
-      const { aiSelectedChapters, book } = state
+      const { aiSelectedChapters, book } = get()
 
       const chapters: { id: string; sectionId: string; title: string; content: string }[] = []
       for (const [sectionId, chapterIds] of aiSelectedChapters) {
@@ -977,14 +1024,10 @@ export const useBookStore = create<BookStore>((set, get) => {
       set({ scoreProcessing: true, aiError: null })
 
       try {
-        const res = await fetch('/api/ai-score', {
+        const res = await fetch('/api/ai-batch-submit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chapters: chapters.map((c) => ({ id: c.id, title: c.title, content: c.content })),
-            question,
-            model,
-          }),
+          body: JSON.stringify({ type: 'scores', chapters, question, model }),
         })
 
         if (!res.ok) {
@@ -992,29 +1035,20 @@ export const useBookStore = create<BookStore>((set, get) => {
           throw new Error(err.error || 'Score-analyse fejlede')
         }
 
-        const result = await res.json()
-
-        // Update chapters with scores
-        for (const r of result.results) {
-          const ch = chapters.find((c) => c.id === r.chapterId)
-          if (!ch) continue
-          updateBook((book) => ({
-            ...book,
-            sections: book.sections.map((s) =>
-              s.id === ch.sectionId
-                ? {
-                    ...s,
-                    chapters: s.chapters.map((c) =>
-                      c.id === r.chapterId ? { ...c, score: r.score, scoreQuestion: question, updatedAt: now() } : c
-                    ),
-                  }
-                : s
-            ),
-          }))
+        const { batchId } = await res.json()
+        const batch: PendingBatch = {
+          batchId,
+          type: 'scores',
+          prompt: `Score: ${question.substring(0, 150)}`,
+          model,
+          submittedAt: new Date().toISOString(),
+          chapters: chapters.map((c) => ({ id: c.id, sectionId: c.sectionId, title: c.title })),
+          question,
         }
 
-        get().saveToServer()
-        get().loadApiUsage()
+        const updated = [...get().pendingBatches, batch]
+        savePendingBatches(updated)
+        set({ pendingBatches: updated })
       } catch (error: any) {
         set({ aiError: error.message || 'Score-analyse fejlede' })
       } finally {
