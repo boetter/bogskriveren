@@ -1,3 +1,4 @@
+// v2 - force rebuild to pick up env vars
 import Anthropic from "@anthropic-ai/sdk";
 import type { Context } from "@netlify/functions";
 import { htmlToText } from "./utils/html-to-text";
