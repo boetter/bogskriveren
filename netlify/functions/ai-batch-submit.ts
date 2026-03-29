@@ -42,10 +42,15 @@ export default async (req: Request, _context: Context) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const apiKey = Netlify.env.get("ANTHROPIC_API_KEY");
+  const hasNetlifyGlobal = typeof Netlify !== "undefined";
+  const netlifyVal = hasNetlifyGlobal ? Netlify.env.get("ANTHROPIC_API_KEY") : null;
+  const processVal = process.env.ANTHROPIC_API_KEY;
+  const apiKey = netlifyVal || processVal;
   if (!apiKey) {
     return Response.json(
-      { error: "ANTHROPIC_API_KEY er ikke konfigureret." },
+      {
+        error: `ANTHROPIC_API_KEY er ikke konfigureret. [debug: Netlify=${hasNetlifyGlobal}, netlifyEnv=${netlifyVal ? "set(" + netlifyVal.length + ")" : "empty"}, processEnv=${processVal ? "set(" + processVal.length + ")" : "empty"}]`,
+      },
       { status: 500 }
     );
   }
