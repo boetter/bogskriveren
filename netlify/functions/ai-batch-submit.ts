@@ -47,9 +47,14 @@ export default async (req: Request, _context: Context) => {
   const processVal = process.env.ANTHROPIC_API_KEY;
   const apiKey = netlifyVal || processVal;
   if (!apiKey) {
+    // List all env var keys to diagnose what's available
+    const envKeys = hasNetlifyGlobal
+      ? Object.keys(Netlify.env.toObject()).filter(k => k.includes("ANTHROPIC") || k.includes("API") || k.includes("KEY") || k.includes("NETLIFY")).sort()
+      : [];
+    const processEnvKeys = Object.keys(process.env).filter(k => k.includes("ANTHROPIC") || k.includes("API") || k.includes("KEY") || k.includes("NETLIFY")).sort();
     return Response.json(
       {
-        error: `ANTHROPIC_API_KEY er ikke konfigureret. [debug: Netlify=${hasNetlifyGlobal}, netlifyEnv=${netlifyVal ? "set(" + netlifyVal.length + ")" : "empty"}, processEnv=${processVal ? "set(" + processVal.length + ")" : "empty"}]`,
+        error: `ANTHROPIC_API_KEY er ikke konfigureret. [debug: Netlify=${hasNetlifyGlobal}, netlifyEnv=${netlifyVal === "" ? "emptyString" : netlifyVal === null ? "null" : netlifyVal === undefined ? "undefined" : "set(" + netlifyVal.length + ")"}, processEnv=${processVal === "" ? "emptyString" : processVal === undefined ? "undefined" : "set(" + processVal.length + ")"}, netlifyKeys=${JSON.stringify(envKeys)}, processKeys=${JSON.stringify(processEnvKeys)}]`,
       },
       { status: 500 }
     );
