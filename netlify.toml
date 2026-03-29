@@ -4,28 +4,7 @@
 
 [functions]
   directory = "netlify/functions"
-  node_bundler = "nft"
-
-[functions."ai-process"]
-  external_node_modules = ["@anthropic-ai/sdk"]
-
-[functions."ai-analyze"]
-  external_node_modules = ["@anthropic-ai/sdk"]
-
-[functions."ai-keywords"]
-  external_node_modules = ["@anthropic-ai/sdk"]
-
-[functions."ai-score"]
-  external_node_modules = ["@anthropic-ai/sdk"]
-
-[functions."ai-batch-submit"]
-  external_node_modules = ["@anthropic-ai/sdk"]
-
-[functions."ai-batch-status"]
-  external_node_modules = ["@anthropic-ai/sdk"]
-
-[functions."ai-selection"]
-  external_node_modules = ["@anthropic-ai/sdk"]
+  node_bundler = "esbuild"
 
 [[redirects]]
   from = "/*"

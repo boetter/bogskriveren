@@ -1,4 +1,3 @@
-// v2 - force rebuild to pick up env vars
 import Anthropic from "@anthropic-ai/sdk";
 import type { Context } from "@netlify/functions";
 import { htmlToText } from "./utils/html-to-text";
@@ -42,20 +41,10 @@ export default async (req: Request, _context: Context) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const hasNetlifyGlobal = typeof Netlify !== "undefined";
-  const netlifyVal = hasNetlifyGlobal ? Netlify.env.get("ANTHROPIC_API_KEY") : null;
-  const processVal = process.env.ANTHROPIC_API_KEY;
-  const apiKey = netlifyVal || processVal;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    // List all env var keys to diagnose what's available
-    const envKeys = hasNetlifyGlobal
-      ? Object.keys(Netlify.env.toObject()).filter(k => k.includes("ANTHROPIC") || k.includes("API") || k.includes("KEY") || k.includes("NETLIFY")).sort()
-      : [];
-    const processEnvKeys = Object.keys(process.env).filter(k => k.includes("ANTHROPIC") || k.includes("API") || k.includes("KEY") || k.includes("NETLIFY")).sort();
     return Response.json(
-      {
-        error: `ANTHROPIC_API_KEY er ikke konfigureret. [debug: Netlify=${hasNetlifyGlobal}, netlifyEnv=${netlifyVal === "" ? "emptyString" : netlifyVal === null ? "null" : netlifyVal === undefined ? "undefined" : "set(" + netlifyVal.length + ")"}, processEnv=${processVal === "" ? "emptyString" : processVal === undefined ? "undefined" : "set(" + processVal.length + ")"}, netlifyKeys=${JSON.stringify(envKeys)}, processKeys=${JSON.stringify(processEnvKeys)}]`,
-      },
+      { error: "ANTHROPIC_API_KEY er ikke konfigureret." },
       { status: 500 }
     );
   }

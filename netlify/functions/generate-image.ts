@@ -12,7 +12,7 @@ export default async (req: Request, _context: Context) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const apiKey = Netlify.env.get("GOOGLE_API_KEY");
+  const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) {
     return Response.json(
       { error: "GOOGLE_API_KEY er ikke konfigureret. Tilføj den i Netlify Environment Variables." },
