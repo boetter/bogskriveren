@@ -1,4 +1,3 @@
-// v2 - force rebuild to pick up env vars
 import Anthropic from "@anthropic-ai/sdk";
 import { getStore } from "@netlify/blobs";
 import type { Context } from "@netlify/functions";
@@ -17,7 +16,7 @@ export default async (req: Request, _context: Context) => {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const apiKey = Netlify.env.get("ANTHROPIC_API_KEY");
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return Response.json(
       { error: "ANTHROPIC_API_KEY er ikke konfigureret." },
